@@ -26,7 +26,7 @@ typedef enum
  * @param reverse if true, will reverse f-stops instead of increase
  * @param resolution f-stop resolution
  * 
- * @return adjusted time
+ * @return adjusted time, rounded to nearest 100ms interval
  */
 uint32_t adjustTime(uint32_t startTime, bool reverse, EFStop_t resolution);
 
@@ -36,12 +36,19 @@ uint32_t adjustTime(uint32_t startTime, bool reverse, EFStop_t resolution);
  * @param reverse if true, will reverse f-stops instead of increase
  * @param steps number of steps
  * @param resolution f-stop resolution
- * @param[out] pRes table of adjusted times in milliseconds -> is memcpy'd to from inside this function, ensure to free!
+ * @param[out] pRes table of adjusted times in milliseconds -> is memcpy'd to from inside this function
  * 
  * @note does not return the start time!
  */
 void getTimeTable(uint32_t startTime, bool reverse, size_t steps, EFStop_t resolution, uint32_t *pRes);
 
-// new time = (old time * multiplier) >> 10
+/**
+ * @brief generate f-stop timing for a specific amount of steps and a base time
+ * @param baseTime start time in milliseconds
+ * @param steps number of steps
+ * @param resolution f-stop resolution
+ * @param[out] pRes table with a full test strip (so 2x steps, one set lower and one set higher + base time in the middle) -> is memcpy'd to from inside this function
+ */
+void genererateTestStrip(uint32_t baseTime, size_t steps, EFStop_t resolution, uint32_t *pRes)
 
 #endif //!_FSTOP_H_
