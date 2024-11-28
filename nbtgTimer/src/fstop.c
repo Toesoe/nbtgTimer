@@ -66,7 +66,8 @@ uint32_t adjustTime(uint32_t startTime, bool reverse, EFStop_t resolution)
 
 void getTimeTable(uint32_t startTime, bool reverse, size_t steps, EFStop_t resolution, uint32_t *pRes)
 {
-    uint32_t newTimes[steps + 1] = { startTime }; // +1 for start time
+    uint32_t newTimes[steps + 1]; // +1 for start time
+    newTimes[0] = startTime;
 
     for (size_t i = 0; i < steps; i++)
     {
@@ -78,16 +79,16 @@ void getTimeTable(uint32_t startTime, bool reverse, size_t steps, EFStop_t resol
 
 void genererateTestStrip(uint32_t baseTime, size_t steps, EFStop_t resolution, uint32_t *pRes)
 {
-    uint32_t testStripTime[(steps * 2) + 1] = { 0 };
+    uint32_t testStripTime[(steps * 2) + 1];
     uint32_t tmp[steps];
 
-    getTimeTable(baseTime, true, steps, resolution, &tmp);
+    getTimeTable(baseTime, true, steps, resolution, &tmp[0]);
     reverseArray(tmp, steps);
     memcpy(testStripTime, tmp, steps * sizeof(uint32_t));
 
     testStripTime[steps] = baseTime;
 
-    getTimeTable(baseTime, false, steps, resolution, &tmp);
+    getTimeTable(baseTime, false, steps, resolution, &tmp[0]);
     memcpy(&testStripTime[steps + 1], tmp, steps * sizeof(uint32_t));
 
     memcpy(pRes, testStripTime, ((steps * 2) + 1) * sizeof(uint32_t));
@@ -95,9 +96,6 @@ void genererateTestStrip(uint32_t baseTime, size_t steps, EFStop_t resolution, u
 
 static void reverseArray(uint32_t *array, size_t size)
 {
-    size_t i = 0;
-    size_t j = size - 1;
-
     for (size_t i = 0; i < size/2; i++)
     {
         uint32_t temp = array[i];

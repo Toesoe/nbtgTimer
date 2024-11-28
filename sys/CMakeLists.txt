@@ -1,2 +1,5 @@
 add_subdirectory(stm32g0xx_sys)
 add_subdirectory(stm32g0xx_hal_driver)
+add_subdirectory(FreeRTOSConfig)
+add_subdirectory(FreeRTOS-Kernel)
+add_subdirectory(bsp)

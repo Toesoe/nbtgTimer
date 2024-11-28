@@ -39,6 +39,7 @@ add_compile_definitions(
 add_subdirectory(nbtgTimer)
 add_subdirectory(sys)
 add_subdirectory(lib)
+add_subdirectory(drv)
 
 target_sources(${FW_ELF_FILE} PRIVATE
     ${CMAKE_SOURCE_DIR}/sys/stm32g0xx_sys/CMSIS/Device/system_stm32g0xx.c
@@ -48,13 +49,20 @@ target_sources(${FW_ELF_FILE} PRIVATE
 target_link_libraries(${FW_ELF_FILE} PRIVATE
     stm32g0xx_sys
     stm32g0xx_ll
-    #tim_bsp
+    freertos_kernel
+    freertos_config
+    bsp
     #tim_drv
 )
 
 target_link_options(${FW_ELF_FILE} PRIVATE
     -Wl,-Map=${FW_MAP_FILE},--cref
     -T${CMAKE_CURRENT_SOURCE_DIR}/sys/stm32g0xx_sys/nbtgTimer.ld
+)
+
+# Don't enforce warnings on external libraries
+target_compile_options(freertos_kernel PRIVATE
+    -w  # -w disables all gcc warnings
 )
 
 add_custom_command(TARGET ${FW_ELF_FILE} POST_BUILD

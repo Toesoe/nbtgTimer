@@ -49,6 +49,6 @@ void getTimeTable(uint32_t startTime, bool reverse, size_t steps, EFStop_t resol
  * @param resolution f-stop resolution
  * @param[out] pRes table with a full test strip (so 2x steps, one set lower and one set higher + base time in the middle) -> is memcpy'd to from inside this function
  */
-void genererateTestStrip(uint32_t baseTime, size_t steps, EFStop_t resolution, uint32_t *pRes)
+void genererateTestStrip(uint32_t baseTime, size_t steps, EFStop_t resolution, uint32_t *pRes);
 
 #endif //!_FSTOP_H_
