@@ -1,7 +1,8 @@
 add_library(bsp
     src/i2c.c
+    src/gpio.c
     src/timer.c
-    src/uart.c
+    #src/uart.c
     src/board.c
 )
 
