@@ -1,7 +1,7 @@
 /**
  * @file i2c.h
  *
- * @brief i2c routines
+ * @brief i2c functionality for nbtgTimer
  */
 
 #ifndef _I2C_H_
@@ -22,26 +22,32 @@ extern "C"
 
 #include "stm32g070xx.h"
 
+#include "timer.h"
+
 //=====================================================================================================================
 // Types
 //=====================================================================================================================
+
+/** @brief typedef for a delay function, takes microseconds */
+typedef void (*fnDelayUs)(uint32_t);
 
 //=====================================================================================================================
 // Defines
 //=====================================================================================================================
 
-// only valid for 64MHz PCLK + analog filter enable!!
-#define I2C_100KHZ (0x10B17DB5)
-#define I2C_400KHZ (0x00C12166)
-#define I2C_1MHZ (0x00910B1C)
-
 //=====================================================================================================================
 // Functions
 //=====================================================================================================================
 
-void initI2C(I2C_TypeDef *, uint32_t, bool);
+void   I2C_Init(void);
+void   I2C_Start(void);
+void   I2C_Write(uint8_t);
+void   I2C_SetupTransfer(uint8_t, uint8_t, bool);
+void   I2C_Stop(void);
+void   I2C_WriteMulti(const uint8_t *, uint8_t, bool);
+void   I2C_Read(uint8_t *, uint8_t);
 
-void initDisplayI2CDMA(void);
+size_t I2C_FindFirstOccurrence(uint8_t, uint8_t, size_t);
 
 #ifdef __cplusplus
 }

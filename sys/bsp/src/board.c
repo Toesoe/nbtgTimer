@@ -97,8 +97,18 @@ void initBoard(void)
     initTimer(&timer1);
     initTimer(&timer14);
 
+    LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_DMA1);
+
+    NVIC_SetPriority(DMA1_Channel1_IRQn, 0);
+    NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+
     initGPIO_peripherals(&g_timerRev1PeriphPins);
     initGPIO_generic(&g_timerRev1GenericPins);
+
+    initI2C(g_R1_eepromI2C.pPeripheral, I2C_100KHZ, false);
+    initI2C(g_R1_dispI2C.pPeripheral, I2C_1MHZ, true);
+
+    initDisplayI2CDMA();
 }
 
 //=====================================================================================================================

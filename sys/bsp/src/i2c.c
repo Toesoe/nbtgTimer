@@ -1,10 +1,8 @@
 /**
  * @file i2c.c
  *
- * @brief i2c functionality for nbtgTimer
+ * @brief i2c functionality
  *
- *
- * TODO: timeouts!
  */
 
 //=====================================================================================================================
@@ -16,24 +14,16 @@
 #include <stm32g0xx_ll_bus.h>
 #include <stm32g0xx_ll_gpio.h>
 #include <stm32g0xx_ll_i2c.h>
+#include <stm32g0xx_ll_dma.h>
 #include <stm32g0xx_ll_rcc.h>
 #include <stm32g0xx_ll_utils.h>
-
-#include "FreeRTOS.h"
-#include "task.h"
-
-#include "timer.h"
+#include <stm32g0xx_ll_system.h>
 
 //=====================================================================================================================
 // Defines
 //=====================================================================================================================
 
-#define I2C_TIMEOUT_US    500
-
-// timings only valid for pclk == 16MHz. when upping clocks use CubeMX to regenerate these values
-#define I2C_TIMING_100KHZ 0x00503D5A
-#define I2C_TIMING_400KHZ 0x00300617
-#define I2C_TIMING_1MHZ   0x00200205
+#define GET_BIT_POS(num) (((num) == 0) ? 0 : __builtin_ctzl(num)) // builtin_ctzl counts trailing zeroes
 
 //=====================================================================================================================
 // Types
@@ -42,6 +32,7 @@
 //=====================================================================================================================
 // Globals
 //=====================================================================================================================
+
 
 //=====================================================================================================================
 // Function prototypes
@@ -52,200 +43,62 @@
 //=====================================================================================================================
 
 /**
- * @brief initialize the I2C peripheral
- * 
- */
-void I2C_Init(void)
-{
-    LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_I2C1);
-    LL_RCC_SetI2CClockSource(LL_RCC_I2C1_CLKSOURCE_PCLK1);
-
-    // disable I2C
-    I2C1->CR1 &= ~I2C_CR1_PE;
-
-    // disable ANF
-    I2C1->CR1 |= I2C_CR1_ANFOFF;
-
-    // set timing, calculated for sysclk == 16MHz
-    I2C1->TIMINGR = I2C_TIMING_400KHZ;
-
-    // enable peripheral
-    I2C1->CR1 |= I2C_CR1_PE;
-}
-
-/**
- * @brief send a start condition
- * 
- */
-void I2C_Start(void)
-{
-    // set start bit
-    I2C1->CR2 |= I2C_CR2_START;
-
-    // wait for bus to become busy
-    while (!(I2C1->ISR & I2C_ISR_BUSY));
-}
-
-/**
- * @brief write a single byte to the I2C peripheral
- * 
- * @param data byte to write
- */
-void I2C_Write(uint8_t data)
-{
-    while (!(I2C1->ISR & I2C_ISR_TXE))
-        ; // wait for TXE bit to set
-    I2C1->TXDR = data;
-}
-
-/**
- * @brief setup a transfer on the I2C bus
- * 
- * @param slaveAddr slave address to read from/write to
- * @param count     amount of bytes to transfer
- * @param isRead    set to true when reading, false when writing
- */
-void I2C_SetupTransfer(uint8_t slaveAddr, uint8_t count, bool isRead)
-{
-    I2C1->CR2 = slaveAddr;                   //  set address
-    if (isRead) I2C1->CR2 |= I2C_CR2_RD_WRN; // set r/w flag
-    I2C1->CR2 &= ~I2C_CR2_AUTOEND;
-
-    uint32_t nbytes = (count << 16);
-    I2C1->CR2 |= nbytes; // nbytes is from bit 16->23
-}
-
-/**
- * @brief send a stop condition
- * 
- */
-void I2C_Stop(void)
-{
-    I2C1->CR2 |= I2C_CR2_STOP;
-}
-
-/**
- * @brief write multiple bytes to the I2C peripheral
- * 
- * @param pData    pointer to buffer containing bytes to write
- * @param size     amount of bytes to write TODO: support more than 255
- * @param autoEnd  if true, will generate a stop condition after (size) bytes
- */
-void I2C_WriteMulti(const uint8_t *pData, uint8_t size, bool autoEnd)
-{
-    /**** STEPS FOLLOWED  ************
-    1. Wait for the TXE (bit 7 in SR1) to set. This indicates that the DR is empty
-    2. Keep Sending DATA to the DR Register after performing the check if the TXE bit is set
-    3. Once the DATA transfer is complete, Wait for the BTF (bit 2 in SR1) to set. This indicates the end of LAST DATA
-    transmission
-    */
-
-    if (autoEnd)
-    {
-        I2C1->CR2 |= I2C_CR2_AUTOEND;
-    }
-
-    while (!(I2C1->ISR & I2C_ISR_TXE))
-        ; // wait for TXE bit to set
-
-    while (size)
-    {
-        while (!(I2C1->ISR & I2C_ISR_TXE))
-            ;                           // wait for TXE bit to set
-        I2C1->TXDR = (uint32_t)*pData++; // send data
-        size--;
-    }
-}
-
-/**
- * @brief read bytes from the I2C peripheral
- * 
- * @param pBuffer buffer to read bytes to
- * @param size    amount of bytes to read TODO: support more than 255
- */
-void I2C_Read(uint8_t *pBuffer, uint8_t size)
-{
-    int remaining = size;
-
-    I2C1->ISR &= ~I2C_ISR_NACKF; // clear the NACK bit
-
-    if (size == 1)
-    {
-        while (!(I2C1->ISR & I2C_ISR_RXNE))
-            ; // wait for rxne
-
-        pBuffer[size - remaining] = (uint8_t)I2C1->RXDR;
-    }
-
-    else
-    {
-        while (remaining > 2)
-        {
-            while (!(I2C1->ISR & I2C_ISR_RXNE))
-                ; // wait for rxne
-
-            pBuffer[size - remaining] = (uint8_t)I2C1->RXDR;
-
-            remaining--;
-        }
-
-        while (!(I2C1->ISR & I2C_ISR_RXNE))
-            ;
-        pBuffer[size - remaining] = (uint8_t)I2C1->RXDR;
-
-        remaining--;
-
-        while (!(I2C1->ISR & I2C_ISR_RXNE))
-            ;
-        pBuffer[size - remaining] = (uint8_t)I2C1->RXDR;
-    }
-}
-
-/**
- * @brief find a specific byte over an I2C device
- * @note  utilizes RELOAD=1 to find a specific byte. does not require I2C_SetupTransfer
+ * @brief Initializes an I2C peripheral
  *
- * @param slaveAddr  slave address to read from
- * @param byteToFind the byte in question to find
- * @param maxSize    maximum amount of bytes to check
+ * Initializes an I2C peripheral given its timing and whether it runs at 1MHz.
+ *
+ * @param[in] pI2CPeriph Pointer to the I2C peripheral to be initialized, either I2C1 or I2C2.
+ * @param[in] timing The value to be written to the I2C_TIMINGR register.
+ * @param[in] is1MHz Whether the I2C peripheral runs at 1MHz. If true, fast mode plus is enabled.
  */
-size_t I2C_FindFirstOccurrence(uint8_t slaveAddr, uint8_t byteToFind, size_t maxSize)
+void initI2C(I2C_TypeDef *pI2CPeriph, uint32_t timing, bool is1MHz)
 {
-    bool   isFound = false;
-    size_t cnt     = 0;
-
-    I2C1->CR2      = slaveAddr;  //  set address
-    I2C1->CR2 |= I2C_CR2_RD_WRN; // switch to READ
-
-    I2C1->CR2 |= (uint32_t)(255 << 16); // nbytes is from bit 16->23
-
-    I2C1->CR2 &= ~I2C_CR2_AUTOEND; // no auto-end
-    I2C1->CR2 |= I2C_CR2_RELOAD;   // set reload mode
-
-    I2C_Start();
-
-    while (!isFound && (cnt != maxSize))
+    if (pI2CPeriph == I2C1)
     {
-        while (!(I2C1->ISR & I2C_ISR_RXNE))
-            ; // wait for rxne
-
-        if (I2C1->RXDR == byteToFind)
-        {
-            isFound = true;
-        }
-        else
-        {
-            cnt++;
-        }
-
-        if (I2C1->ISR & I2C_ISR_TCR)
-        {
-            // transmission complete reload. reset transfer
-            I2C1->CR2 |= (uint32_t)(255 << 16); // set new number of bytes
-        }
+        LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_I2C1);
     }
-    I2C1->CR2 &= ~I2C_CR2_RELOAD; // clear reload bit
-    I2C_Stop();
+    else if (pI2CPeriph == I2C2)
+    {
+        LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_I2C2);
+    }
 
-    return cnt;
+    LL_I2C_InitTypeDef I2C_InitStruct = {0};
+
+    I2C_InitStruct.PeripheralMode  = LL_I2C_MODE_I2C;
+    I2C_InitStruct.Timing          = timing;
+    I2C_InitStruct.AnalogFilter    = LL_I2C_ANALOGFILTER_ENABLE;
+    I2C_InitStruct.DigitalFilter   = 0;
+    I2C_InitStruct.OwnAddress1     = 0;
+    I2C_InitStruct.TypeAcknowledge = LL_I2C_ACK;
+    I2C_InitStruct.OwnAddrSize     = LL_I2C_OWNADDRESS1_7BIT;
+    LL_I2C_Init(pI2CPeriph, &I2C_InitStruct);
+    LL_I2C_EnableAutoEndMode(pI2CPeriph);
+    LL_I2C_SetOwnAddress2(pI2CPeriph, 0, LL_I2C_OWNADDRESS2_NOMASK);
+    LL_I2C_DisableOwnAddress2(pI2CPeriph);
+    LL_I2C_DisableGeneralCall(pI2CPeriph);
+    LL_I2C_EnableClockStretching(pI2CPeriph);
+
+    if (is1MHz)
+    {
+        LL_SYSCFG_EnableFastModePlus(pI2CPeriph == I2C1 ? LL_SYSCFG_I2C_FASTMODEPLUS_I2C1 : LL_SYSCFG_I2C_FASTMODEPLUS_I2C2);
+    }
+}
+
+/**
+ * @brief Initializes the DMA for I2C2 (display) transmit transfers.
+ *
+ * Initializes the DMA for I2C2 (display) transmit transfers.
+ *
+ * @note This function must be called before the display is initialized.
+ */
+void initDisplayI2CDMA(void)
+{
+    LL_DMA_SetPeriphRequest(DMA1, LL_DMA_CHANNEL_1, LL_DMAMUX_REQ_I2C2_TX);
+    LL_DMA_SetDataTransferDirection(DMA1, LL_DMA_CHANNEL_1, LL_DMA_DIRECTION_MEMORY_TO_PERIPH);
+    LL_DMA_SetChannelPriorityLevel(DMA1, LL_DMA_CHANNEL_1, LL_DMA_PRIORITY_LOW);
+    LL_DMA_SetMode(DMA1, LL_DMA_CHANNEL_1, LL_DMA_MODE_NORMAL);
+    LL_DMA_SetPeriphIncMode(DMA1, LL_DMA_CHANNEL_1, LL_DMA_PERIPH_NOINCREMENT);
+    LL_DMA_SetMemoryIncMode(DMA1, LL_DMA_CHANNEL_1, LL_DMA_MEMORY_INCREMENT);
+    LL_DMA_SetPeriphSize(DMA1, LL_DMA_CHANNEL_1, LL_DMA_PDATAALIGN_BYTE);
+    LL_DMA_SetMemorySize(DMA1, LL_DMA_CHANNEL_1, LL_DMA_MDATAALIGN_BYTE);
 }
