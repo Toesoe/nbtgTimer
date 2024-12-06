@@ -61,7 +61,7 @@ void initGPIO_peripherals(STimerPeriphPinDef_t *pPinDefs)
 }
 
 
-void initGPIO_generic(SGenericGPIOPin_t *pPinDefs)
+void initGPIO_generic(STimerGenericPinDef_t *pPinDefs)
 {
     g_pCurrentGenericPinDefs = pPinDefs;
 
@@ -186,4 +186,6 @@ static void initGPIO_Generic(SGenericGPIOPin_t *pGenericPinDef)
         .OutputType = LL_GPIO_OUTPUT_PUSHPULL,
         .Pull = LL_GPIO_PULL_NO,
     };
+
+    LL_GPIO_Init(pGenericPinDef->pinPort.port, &gpio);
 }

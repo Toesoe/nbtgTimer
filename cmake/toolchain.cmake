@@ -11,9 +11,9 @@ if (NOT DEFINED ENV{NBTG_TIMER_TOOLCHAIN})
         set(TOOLCHAIN_PATH /opt/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi/bin)
     endif()
 
-    # if (CMAKE_HOST_WIN32)
-    #     set(TOOLCHAIN_PATH C:/Program\ Files\ \(x86\)/GNU\ Arm\ Embedded\ Toolchain/9\ 2020-q2-update/bin)
-    # endif()
+    if (CMAKE_HOST_WIN32)
+        set(TOOLCHAIN_PATH C:/SysGCC/arm-eabi/bin)
+    endif()
 
     message(WARNING "NBTG_TIMER_TOOLCHAIN environment variable is not set. Using default path ${TOOLCHAIN_PATH}")
 else()

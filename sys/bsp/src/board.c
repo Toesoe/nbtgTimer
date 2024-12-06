@@ -40,21 +40,22 @@ STimerDef_t timer14 = {TIM14, 100};
 
 // I2C:                   periph, SDA                     , SCL                     , WP                      , AFMODE
 SI2CPinDef_t g_R1_eepromI2C = {I2C1, { LL_GPIO_PIN_7, GPIOB }, { LL_GPIO_PIN_6, GPIOB }, { LL_GPIO_PIN_5, GPIOB }, LL_GPIO_AF_6 };
-SI2CPinDef_t g_R1_dispI2C   = {I2C2, { LL_GPIO_PIN_11, GPIOB }, { LL_GPIO_PIN_10, GPIOB }, NULL,                   LL_GPIO_AF_6 }; // OPT1 and OPT2 on schematic
+SI2CPinDef_t g_R1_dispI2C   = {I2C2, { LL_GPIO_PIN_11, GPIOB }, { LL_GPIO_PIN_10, GPIOB }, {0, 0}                , LL_GPIO_AF_6 }; // OPT1 and OPT2 on schematic
 
 // Generic
-SGenericGPIOPin_t    g_R1_button10SecPlus       = {{ LL_GPIO_PIN_7, GPIOA }, false };
-SGenericGPIOPin_t    g_R1_button10SecMinus      = {{ LL_GPIO_PIN_6, GPIOA }, false };
-SGenericGPIOPin_t    g_R1_button1SecPlus        = {{ LL_GPIO_PIN_5, GPIOA }, false };
-SGenericGPIOPin_t    g_R1_button1SecMinus       = {{ LL_GPIO_PIN_4, GPIOA }, false };
-SGenericGPIOPin_t    g_R1_button100MsecPlus     = {{ LL_GPIO_PIN_3, GPIOA }, false };
-SGenericGPIOPin_t    g_R1_button100MsecMinus    = {{ LL_GPIO_PIN_2, GPIOA }, false };
-SGenericGPIOPin_t    g_R1_buttonToggleLamp      = {{ LL_GPIO_PIN_2, GPIOC }, false };
-SGenericGPIOPin_t    g_R1_buttonStartTimer      = {{ LL_GPIO_PIN_3, GPIOC }, false };
-SGenericGPIOPin_t    g_R1_buttonMode            = {{ LL_GPIO_PIN_1, GPIOC }, false };
+SGenericGPIOPin_t    g_R1_button10SecPlus       = {{ LL_GPIO_PIN_7, GPIOA }, false }; // SW4
+SGenericGPIOPin_t    g_R1_button10SecMinus      = {{ LL_GPIO_PIN_6, GPIOA }, false }; // SW7
+SGenericGPIOPin_t    g_R1_button1SecPlus        = {{ LL_GPIO_PIN_5, GPIOA }, false }; // SW5
+SGenericGPIOPin_t    g_R1_button1SecMinus       = {{ LL_GPIO_PIN_4, GPIOA }, false }; // SW8
+SGenericGPIOPin_t    g_R1_button100MsecPlus     = {{ LL_GPIO_PIN_3, GPIOA }, false }; // SW6
+SGenericGPIOPin_t    g_R1_button100MsecMinus    = {{ LL_GPIO_PIN_2, GPIOA }, false }; // SW9
+SGenericGPIOPin_t    g_R1_buttonToggleLamp      = {{ LL_GPIO_PIN_2, GPIOC }, false }; // SW1
+SGenericGPIOPin_t    g_R1_buttonStartTimer      = {{ LL_GPIO_PIN_3, GPIOC }, false }; // SW2
+SGenericGPIOPin_t    g_R1_buttonMode            = {{ LL_GPIO_PIN_1, GPIOC }, false }; // SW3
 SGenericGPIOPin_t    g_R1_pinOptocoupler        = {{ LL_GPIO_PIN_2, GPIOB }, true };
 SGenericGPIOPin_t    g_R1_footswitchDetect      = {{ LL_GPIO_PIN_1, GPIOB }, false };
 SGenericGPIOPin_t    g_R1_footswitchInput       = {{ LL_GPIO_PIN_0, GPIOB }, false };
+SGenericGPIOPin_t    g_R1_pinBuzzer             = {{ LL_GPIO_PIN_8, GPIOB }, true };  // SW18
 
 STimerPeriphPinDef_t g_timerRev1PeriphPins      = {
          &g_R1_eepromI2C,
@@ -97,10 +98,12 @@ void initBoard(void)
     initTimer(&timer1);
     initTimer(&timer14);
 
-    LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_DMA1);
-
     NVIC_SetPriority(DMA1_Channel1_IRQn, 0);
     NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+
+    LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA);
+    LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOB);
+    LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOC);
 
     initGPIO_peripherals(&g_timerRev1PeriphPins);
     initGPIO_generic(&g_timerRev1GenericPins);

@@ -76,10 +76,10 @@ static SSD1306_t SSD1306;
 // Function prototypes
 //=====================================================================================================================
 
-__attribute__((weak)) ssd1306_Reset(void);
-__attribute__((weak)) ssd1306_WriteSingle(uint8_t);
-__attribute__((weak)) ssd1306_WriteMulti(uint8_t *, size_t);
-__attribute__((weak)) ssd1306_delayMs(uint32_t);
+__attribute__((weak)) void ssd1306_Reset(void);
+__attribute__((weak)) void ssd1306_WriteSingle(uint8_t);
+__attribute__((weak)) void ssd1306_WriteMulti(uint8_t *, size_t);
+__attribute__((weak)) void ssd1306_delayMs(uint32_t);
 
 //=====================================================================================================================
 // External functions

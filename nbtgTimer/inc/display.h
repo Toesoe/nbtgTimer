@@ -25,6 +25,11 @@ extern "C"
 
 void initDisplay(void);
 
+void ssd1306_Reset(void);
+void ssd1306_WriteSingle(uint8_t);
+void ssd1306_WriteMulti(uint8_t *, size_t);
+void ssd1306_delayMs(uint32_t);
+
 #ifdef __cplusplus
 }
 #endif

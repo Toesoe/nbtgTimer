@@ -65,11 +65,11 @@ target_compile_options(freertos_kernel PRIVATE
     -w  # -w disables all gcc warnings
 )
 
-add_custom_command(TARGET ${FW_ELF_FILE} POST_BUILD
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/size_mcu.sh ${CMAKE_SIZE_UTIL} ${FW_ELF_FILE} --flash 131072 --ram 36864
-    COMMAND ${CMAKE_OBJCOPY} -O ihex ${FW_ELF_FILE} ${FW_HEX_FILE}
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-)
+# add_custom_command(TARGET ${FW_ELF_FILE} POST_BUILD
+#     COMMAND ${CMAKE_SOURCE_DIR}/scripts/size_mcu.sh ${CMAKE_SIZE_UTIL} ${FW_ELF_FILE} --flash 131072 --ram 36864
+#     COMMAND ${CMAKE_OBJCOPY} -O ihex ${FW_ELF_FILE} ${FW_HEX_FILE}
+#     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+# )
 
 if (BUILD_DOC)
 

@@ -26,6 +26,9 @@ extern "C"
 // Types
 //=====================================================================================================================
 
+typedef void (*i2cDMACompleteCb)(void);
+typedef void (*i2cDMAErrorCb)(void);
+
 //=====================================================================================================================
 // Defines
 //=====================================================================================================================
@@ -41,7 +44,7 @@ extern "C"
 
 void initI2C(I2C_TypeDef *, uint32_t, bool);
 
-void initDisplayI2CDMA(void);
+void initDisplayI2CDMA(size_t, uint32_t, i2cDMACompleteCb, i2cDMAErrorCb);
 
 #ifdef __cplusplus
 }

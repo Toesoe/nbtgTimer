@@ -114,7 +114,7 @@ typedef struct
 //=====================================================================================================================
 
 void initGPIO_peripherals(STimerPeriphPinDef_t *);
-void initGPIO_generic(SGenericGPIOPin_t *);
+void initGPIO_generic(STimerGenericPinDef_t *);
 
 void toggleEepromWP(bool);
 void toggleOptocoupler(bool);
