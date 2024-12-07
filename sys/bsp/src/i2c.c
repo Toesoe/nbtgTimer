@@ -99,6 +99,22 @@ void initI2C(I2C_TypeDef *pI2CPeriph, uint32_t timing, bool isDisplay)
     LL_I2C_Enable(pI2CPeriph);
 }
 
+void I2CTransmit(I2C_TypeDef *pI2CPeriph, uint8_t addr, uint8_t *data, size_t len)
+{
+    pI2CPeriph->TXDR = *data++; // fix for erratum 2.8.6
+    LL_I2C_HandleTransfer(pI2CPeriph, addr, LL_I2C_ADDRSLAVE_7BIT, len, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
+
+    while (!LL_I2C_IsActiveFlag_TC(pI2CPeriph))
+    {
+        while (!LL_I2C_IsActiveFlag_TXE(pI2CPeriph)) {}
+        LL_I2C_TransmitData8(pI2CPeriph, *data++);
+    }
+
+    while (!LL_I2C_IsActiveFlag_STOP(pI2CPeriph)){}
+    LL_I2C_ClearFlag_TC(pI2CPeriph);
+    LL_I2C_ClearFlag_STOP(pI2CPeriph);
+}
+
 /**
  * @brief Initializes the DMA for I2C display transfer.
  *

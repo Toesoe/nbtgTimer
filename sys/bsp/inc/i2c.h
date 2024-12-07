@@ -43,8 +43,9 @@ typedef void (*i2cDMAErrorCb)(void);
 //=====================================================================================================================
 
 void initI2C(I2C_TypeDef *, uint32_t, bool);
+void I2CTransmit(I2C_TypeDef *, uint8_t, uint8_t *, size_t);
 
-void initDisplayI2CDMA(size_t, uint32_t, i2cDMACompleteCb, i2cDMAErrorCb);
+void initDisplayI2CDMA(uint8_t, size_t, uint32_t, i2cDMACompleteCb, i2cDMAErrorCb);
 
 #ifdef __cplusplus
 }

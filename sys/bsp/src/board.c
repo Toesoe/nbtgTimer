@@ -110,8 +110,6 @@ void initBoard(void)
 
     initI2C(g_R1_eepromI2C.pPeripheral, I2C_100KHZ, false);
     initI2C(g_R1_dispI2C.pPeripheral, I2C_1MHZ, true);
-
-    initDisplayI2CDMA();
 }
 
 //=====================================================================================================================
