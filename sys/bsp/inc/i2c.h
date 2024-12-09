@@ -26,8 +26,15 @@ extern "C"
 // Types
 //=====================================================================================================================
 
-typedef void (*i2cDMACompleteCb)(void);
-typedef void (*i2cDMAErrorCb)(void);
+typedef void (*i2cStatusCallback)(bool);
+
+typedef struct
+{
+    uint8_t address;
+    uint8_t *pBuffer;
+    size_t len;
+    size_t transferred;
+} SI2CTransfer_t;
 
 //=====================================================================================================================
 // Defines
@@ -42,10 +49,13 @@ typedef void (*i2cDMAErrorCb)(void);
 // Functions
 //=====================================================================================================================
 
-void initI2C(I2C_TypeDef *, uint32_t, bool);
-void I2CTransmit(I2C_TypeDef *, uint8_t, uint8_t *, size_t);
+void i2cInit(I2C_TypeDef *, uint32_t, bool);
+void i2cRegisterCallback(i2cStatusCallback);
 
-void initDisplayI2CDMA(uint8_t, size_t, uint32_t, i2cDMACompleteCb, i2cDMAErrorCb);
+void i2cTransmit(I2C_TypeDef *, SI2CTransfer_t *);
+
+void i2cInitDisplayDMA(i2cStatusCallback);
+void i2cTransferDisplayDMA(SI2CTransfer_t *);
 
 #ifdef __cplusplus
 }

@@ -33,17 +33,11 @@
 // Globals
 //=====================================================================================================================
 
-static i2cDMACompleteCb g_fnCbTxComplete = NULL;
-static i2cDMAErrorCb g_fnCbTxError = NULL;
+static i2cStatusCallback g_fnI2cDMACallback = NULL;
+static i2cStatusCallback g_fnI2cRegularCallback = NULL;
 
-static I2C_TypeDef *g_pI2CDisp = NULL;
-
-static uint8_t g_dispI2CAddr = 0;
-static uint32_t g_dispFramebufSize = 0;
-static uint32_t g_dispFramebufAddr = 0;
-
-static uint32_t g_curFramebufSize = 0;
-static uint32_t g_curFramebufAddr = 0;
+static SI2CTransfer_t *g_pCurrentTransfer_I2C1 = NULL;
+static SI2CTransfer_t *g_pCurrentTransfer_I2C2 = NULL;
 
 //=====================================================================================================================
 // Function prototypes
@@ -62,57 +56,56 @@ static uint32_t g_curFramebufAddr = 0;
  * @param[in] timing The value to be written to the I2C_TIMINGR register.
  * @param[in] isDisplay Whether the I2C peripheral is used for display. If true, fast mode plus + DMA is enabled.
  */
-void initI2C(I2C_TypeDef *pI2CPeriph, uint32_t timing, bool isDisplay)
+void i2cInit(I2C_TypeDef *pI2CPeriph, uint32_t timing, bool isDisplay)
 {
     if (pI2CPeriph == I2C1)
     {
         LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_I2C1);
+        NVIC_SetPriority(I2C1_IRQn, 0);
+        NVIC_EnableIRQ(I2C1_IRQn);
     }
     else if (pI2CPeriph == I2C2)
     {
         LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_I2C2);
+        NVIC_SetPriority(I2C2_IRQn, 0);
+        NVIC_EnableIRQ(I2C2_IRQn);
     }
 
-    LL_I2C_InitTypeDef I2C_InitStruct = {0};
-
-    I2C_InitStruct.PeripheralMode  = LL_I2C_MODE_I2C;
-    I2C_InitStruct.Timing          = timing;
-    I2C_InitStruct.AnalogFilter    = LL_I2C_ANALOGFILTER_ENABLE;
-    I2C_InitStruct.DigitalFilter   = 0;
-    I2C_InitStruct.OwnAddress1     = 0;
-    I2C_InitStruct.TypeAcknowledge = LL_I2C_ACK;
-    I2C_InitStruct.OwnAddrSize     = LL_I2C_OWNADDRESS1_7BIT;
-    LL_I2C_Init(pI2CPeriph, &I2C_InitStruct);
-    LL_I2C_EnableAutoEndMode(pI2CPeriph);
-    LL_I2C_SetOwnAddress2(pI2CPeriph, 0, LL_I2C_OWNADDRESS2_NOMASK);
-    LL_I2C_DisableOwnAddress2(pI2CPeriph);
-    LL_I2C_DisableGeneralCall(pI2CPeriph);
-    LL_I2C_EnableClockStretching(pI2CPeriph);
+    LL_I2C_Disable(pI2CPeriph);
+    LL_I2C_SetTiming(pI2CPeriph, timing);
 
     if (isDisplay)
     {
-        g_pI2CDisp = pI2CPeriph;
         LL_SYSCFG_EnableFastModePlus(pI2CPeriph == I2C1 ? LL_SYSCFG_I2C_FASTMODEPLUS_I2C1 : LL_SYSCFG_I2C_FASTMODEPLUS_I2C2);
         LL_I2C_EnableDMAReq_TX(pI2CPeriph);
     }
 
     LL_I2C_Enable(pI2CPeriph);
+
+    LL_I2C_EnableIT_TX(pI2CPeriph);
+    LL_I2C_EnableIT_RX(pI2CPeriph);
+    LL_I2C_EnableIT_NACK(pI2CPeriph);
+    LL_I2C_EnableIT_ERR(pI2CPeriph);
+    LL_I2C_EnableIT_STOP(pI2CPeriph);
+    LL_I2C_EnableIT_TC(pI2CPeriph);
 }
 
-void I2CTransmit(I2C_TypeDef *pI2CPeriph, uint8_t addr, uint8_t *data, size_t len)
+void i2cRegisterCallback(i2cStatusCallback callback)
 {
-    pI2CPeriph->TXDR = *data++; // fix for erratum 2.8.6
-    LL_I2C_HandleTransfer(pI2CPeriph, addr, LL_I2C_ADDRSLAVE_7BIT, len, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
+    g_fnI2cRegularCallback = callback;
+}
 
-    while (!LL_I2C_IsActiveFlag_TC(pI2CPeriph))
-    {
-        while (!LL_I2C_IsActiveFlag_TXE(pI2CPeriph)) {}
-        LL_I2C_TransmitData8(pI2CPeriph, *data++);
-    }
+void i2cTransmit(I2C_TypeDef *pI2CPeriph, SI2CTransfer_t *pI2CTransferCtx)
+{
+    pI2CPeriph->TXDR = *(pI2CTransferCtx->pBuffer++); // fix for erratum 2.8.6
+    pI2CTransferCtx->transferred = 0;
 
-    while (!LL_I2C_IsActiveFlag_STOP(pI2CPeriph)){}
-    LL_I2C_ClearFlag_TC(pI2CPeriph);
-    LL_I2C_ClearFlag_STOP(pI2CPeriph);
+    if (pI2CPeriph == I2C1) { g_pCurrentTransfer_I2C1 = pI2CTransferCtx; }
+    else { LL_I2C_DisableDMAReq_TX(I2C2); g_pCurrentTransfer_I2C2 = pI2CTransferCtx; }
+
+    uint16_t chunkSize = (pI2CTransferCtx->len > 255) ? 255 : pI2CTransferCtx->len;
+
+    LL_I2C_HandleTransfer(pI2CPeriph, pI2CTransferCtx->address, LL_I2C_ADDRSLAVE_7BIT, chunkSize, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
 }
 
 /**
@@ -122,13 +115,13 @@ void I2CTransmit(I2C_TypeDef *pI2CPeriph, uint8_t addr, uint8_t *data, size_t le
  * I2C peripheral for display purposes. Sets up interrupt handlers for 
  * transfer completion and error scenarios.
  *
- * @param[in] framebufferSize The size of the framebuffer to be transferred.
- * @param[in] framebufferAddress The memory address of the framebuffer.
- * @param[in] cbTxComplete Callback function to be called upon transfer completion.
- * @param[in] cbTxError Callback function to be called upon transfer error.
+ * @param[in] dispAddr The I2C address of the display controller.
+ * @param[in] dmaStatusCb callback for dma complete or error
+ *
  */
-void initDisplayI2CDMA(uint8_t dispAddr, size_t framebufferSize, uint32_t framebufferAddress, i2cDMACompleteCb cbTxComplete, i2cDMAErrorCb cbTxError)
+void i2cInitDisplayDMA(i2cStatusCallback dmaStatusCb)
 {
+    LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_DMA1);
     LL_DMA_SetPeriphRequest(DMA1, LL_DMA_CHANNEL_1, LL_DMAMUX_REQ_I2C2_TX);
     LL_DMA_SetDataTransferDirection(DMA1, LL_DMA_CHANNEL_1, LL_DMA_DIRECTION_MEMORY_TO_PERIPH);
     LL_DMA_SetChannelPriorityLevel(DMA1, LL_DMA_CHANNEL_1, LL_DMA_PRIORITY_LOW);
@@ -144,59 +137,128 @@ void initDisplayI2CDMA(uint8_t dispAddr, size_t framebufferSize, uint32_t frameb
     NVIC_SetPriority(DMA1_Channel1_IRQn, 0);
     NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
-    LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_1, framebufferSize);
-    LL_DMA_ConfigAddresses(DMA1, LL_DMA_CHANNEL_1, framebufferAddress, LL_I2C_DMA_GetRegAddr(g_pI2CDisp, LL_I2C_DMA_REG_DATA_TRANSMIT), LL_DMA_DIRECTION_MEMORY_TO_PERIPH);
-    LL_DMA_SetMemoryAddress(DMA1, LL_DMA_CHANNEL_1, framebufferAddress);
-
-    g_fnCbTxComplete = cbTxComplete;
-    g_fnCbTxError = cbTxError;
-    g_dispI2CAddr = dispAddr;
-    g_dispFramebufSize = framebufferSize;
-    g_dispFramebufAddr = framebufferAddress;
-    g_curFramebufAddr = framebufferAddress;
+    g_fnI2cDMACallback = dmaStatusCb;
 }
 
-void i2cTransferDMA(void)
+/**
+ * @brief start DMA transaction to display
+ * 
+ */
+void i2cTransferDisplayDMA(SI2CTransfer_t *pDisplayDMATransferCtx)
 {
-    g_curFramebufSize = g_dispFramebufSize - 255;
-    g_curFramebufAddr = g_dispFramebufAddr + 255;
+    g_pCurrentTransfer_I2C2 = pDisplayDMATransferCtx;
+    g_pCurrentTransfer_I2C2->transferred = 0;
 
-    LL_DMA_SetMemoryAddress(DMA1, LL_DMA_CHANNEL_1, g_dispFramebufAddr);
+    // LL_I2C_DisableIT_TX(I2C2);
+    // LL_I2C_DisableIT_RX(I2C2);
+    // LL_I2C_DisableIT_NACK(I2C2);
+    // LL_I2C_DisableIT_ERR(I2C2);
+    // LL_I2C_DisableIT_STOP(I2C2);
+    // LL_I2C_DisableIT_TC(I2C2);
+
+    LL_DMA_ConfigAddresses(DMA1, LL_DMA_CHANNEL_1,
+      (uint32_t)pDisplayDMATransferCtx->pBuffer,
+      (uint32_t)LL_I2C_DMA_GetRegAddr(I2C2, LL_I2C_DMA_REG_DATA_TRANSMIT),
+      LL_DMA_GetDataTransferDirection(DMA1, LL_DMA_CHANNEL_1)
+    );
+
     LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_1, 255);
+
     LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_1);
-    LL_I2C_HandleTransfer(g_pI2CDisp, g_dispI2CAddr, LL_I2C_ADDRSLAVE_7BIT, 255, LL_I2C_MODE_SOFTEND, LL_I2C_GENERATE_START_WRITE);
+
+    LL_I2C_HandleTransfer(I2C2, g_pCurrentTransfer_I2C2->address, LL_I2C_ADDRSLAVE_7BIT, 255, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
 }
 
 __attribute__((interrupt)) void DMA1_Channel1_IRQHandler(void)
-{
+{ 
     if (LL_DMA_IsActiveFlag_TC1(DMA1))
     {
+        LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_1);
         LL_DMA_ClearFlag_TC1(DMA1);
 
-        if (g_curFramebufSize > 0)
+        // get previous transfer amount
+        g_pCurrentTransfer_I2C2->transferred += (uint8_t)((I2C2->CR2 & I2C_CR2_NBYTES) >> I2C_CR2_NBYTES_Pos);
+
+        if (g_pCurrentTransfer_I2C2->transferred < g_pCurrentTransfer_I2C2->len)
         {
-            uint16_t current_chunk_size = (g_curFramebufSize > 255) ? 255 : g_curFramebufSize;
-            LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_1);
-            LL_DMA_SetMemoryAddress(DMA1, LL_DMA_CHANNEL_1, g_curFramebufAddr);
-            LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_1, current_chunk_size);
+            uint16_t chunkSize = ((g_pCurrentTransfer_I2C2->len - g_pCurrentTransfer_I2C2->transferred) > 255) ? 255 : (g_pCurrentTransfer_I2C2->len - g_pCurrentTransfer_I2C2->transferred);
+
+            LL_DMA_ConfigAddresses(DMA1, LL_DMA_CHANNEL_1,
+                (uint32_t)(((uint32_t)g_pCurrentTransfer_I2C2->pBuffer) + g_pCurrentTransfer_I2C2->transferred),
+                (uint32_t)LL_I2C_DMA_GetRegAddr(I2C2, LL_I2C_DMA_REG_DATA_TRANSMIT),
+                LL_DMA_GetDataTransferDirection(DMA1, LL_DMA_CHANNEL_1)
+            );
+
+            LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_1, chunkSize);
+
             LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_1);
 
-            LL_I2C_HandleTransfer(g_pI2CDisp, g_dispI2CAddr, LL_I2C_ADDRSLAVE_7BIT, current_chunk_size, LL_I2C_MODE_SOFTEND, LL_I2C_GENERATE_RESTART_7BIT_WRITE);
-
-            g_curFramebufSize -= current_chunk_size;
-            g_curFramebufAddr += current_chunk_size;
+            LL_I2C_HandleTransfer(I2C2, g_pCurrentTransfer_I2C2->address, LL_I2C_ADDRSLAVE_7BIT, chunkSize, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
         }
         else
         {
-            LL_I2C_GenerateStopCondition(g_pI2CDisp);
-            LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_1);
-            if (g_fnCbTxComplete != NULL) g_fnCbTxComplete();
+            if (g_fnI2cDMACallback != NULL) g_fnI2cDMACallback(true);
         }
     }
     else if (LL_DMA_IsActiveFlag_TE1(DMA1))
     {
         LL_DMA_ClearFlag_TE1(DMA1);
-        LL_I2C_ClearFlag_STOP(g_pI2CDisp);
-        if (g_fnCbTxError != NULL) g_fnCbTxError();
+        LL_I2C_ClearFlag_STOP(I2C2);
+        if (g_fnI2cDMACallback != NULL) g_fnI2cDMACallback(false);
+    }
+}
+
+__attribute((interrupt)) void I2C1_IRQHandler(void)
+{
+  /* Check RXNE flag value in ISR register */
+    if (LL_I2C_IsActiveFlag_TXIS(I2C1))
+    {
+        g_pCurrentTransfer_I2C1->transferred++;
+        LL_I2C_TransmitData8(I2C1, *(g_pCurrentTransfer_I2C1->pBuffer++));
+    }
+    /* Check STOP flag value in ISR register */
+    else if (LL_I2C_IsActiveFlag_STOP(I2C1))
+    {
+        /* End of Transfer */
+        LL_I2C_ClearFlag_STOP(I2C1);
+        if (g_fnI2cRegularCallback != NULL) g_fnI2cRegularCallback(true);
+    }
+    else
+    {
+        if (g_fnI2cRegularCallback != NULL) g_fnI2cRegularCallback(false);
+    }
+}
+
+__attribute((interrupt)) void I2C2_IRQHandler(void)
+{
+    if (LL_I2C_IsActiveFlag_NACK(I2C2))
+    {
+        LL_I2C_ClearFlag_NACK(I2C2);
+    }
+
+    else if (LL_I2C_IsActiveFlag_TXIS(I2C2))
+    {
+        g_pCurrentTransfer_I2C2->transferred++;
+        LL_I2C_TransmitData8(I2C2, *g_pCurrentTransfer_I2C2->pBuffer++);
+    }
+
+    else if (LL_I2C_IsActiveFlag_STOP(I2C2))
+    {
+        LL_I2C_ClearFlag_STOP(I2C2);
+
+        if (g_pCurrentTransfer_I2C2->transferred < g_pCurrentTransfer_I2C2->len)
+        {
+            uint16_t chunkSize = ((g_pCurrentTransfer_I2C2->len - g_pCurrentTransfer_I2C2->transferred) > 255) ? 255 : (g_pCurrentTransfer_I2C2->len - g_pCurrentTransfer_I2C2->transferred);
+
+            LL_I2C_HandleTransfer(I2C2, g_pCurrentTransfer_I2C2->address, LL_I2C_ADDRSLAVE_7BIT, chunkSize, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_RESTART_7BIT_WRITE);
+        }
+        else
+        {
+            if (g_fnI2cRegularCallback != NULL) g_fnI2cRegularCallback(true);
+        }
+    }
+    else
+    {
+        if (g_fnI2cRegularCallback != NULL) g_fnI2cRegularCallback(false);
     }
 }

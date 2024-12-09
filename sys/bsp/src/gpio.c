@@ -140,6 +140,9 @@ static void initGPIO_I2C(SI2CPinDef_t *pI2CDef)
     i2cGpio.Pin = pI2CDef->sdaPin.pin;
     LL_GPIO_Init(pI2CDef->sdaPin.port, &i2cGpio);
 
+    LL_GPIO_SetPinPull(pI2CDef->sdaPin.port, pI2CDef->sdaPin.pin, LL_GPIO_PULL_NO);
+    LL_GPIO_SetPinPull(pI2CDef->sclPin.port, pI2CDef->sclPin.pin, LL_GPIO_PULL_NO);
+
     if (pI2CDef->wpPin.pin != 0)
     {
         i2cGpio.Mode = LL_GPIO_MODE_OUTPUT;

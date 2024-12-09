@@ -15,6 +15,7 @@
 #include <task.h>
 
 #include "board.h"
+#include "display.h"
 
 //=====================================================================================================================
 // Defines
@@ -37,4 +38,6 @@ static StackType_t  tskMgrStack[TASKMGR_TASK_STACK_SIZE * sizeof(StackType_t)];
 int main(void)
 {
     initBoard();
+
+    initDisplay();
 }
