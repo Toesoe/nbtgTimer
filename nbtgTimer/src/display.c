@@ -151,23 +151,27 @@ void dispDrawPixel(uint8_t col, uint8_t row)
 {
     // we use 1,1 as the origin, so always subtract 1 for correct calculations
     // we need the original number so do the calculation inline
+
+    // page 0-3. rsh4 gives us the correct page
+    size_t page = (row - 1) >> 4;
+
     if (((row - 1) % 2) == 0)
     {
-        // even: page 0-3. rsh4 gives us the correct page
-        size_t page = (row - 1) >> 4;
-
-        // if we multiply this rsh value by 16 we get the offset (0, 16, 32, 48)
-        // if we subtract this from the original y position and rsh by 1 we get the right row to work on
-        uint8_t *pRow = &g_framebuffer.pages[(row - 1) >> 4].rows[(row - 1) - ((page * 16) >> 1)];
-
-        // now that we have the row we just need to figure out the Y in the column where the pixel will go
-        // every column consists of 8 bytes, so for example a pixel in column 7 should go into byte 0, bit 6
-        // another example, column 18 is byte 2, bit 1
-        // first we have to rsh3 the column number to get the correct offset in the row, then set the bit for the correct number
-        // to find the correct bit we modulo by 8, minus one
-
-        *(pRow + ((col - 1) >> 3)) |= (1 << ((col % 8) - 1));
+        // when uneven, start at page 4.
+        page += 4;
     }
+
+    // if we multiply this rsh value by 16 we get the offset (0, 16, 32, 48)
+    // if we subtract this from the original y position and rsh by 1 we get the right row to work on
+    uint8_t *pRow = &g_framebuffer.pages[(row - 1) >> 4].rows[(row - 1) - ((page * 16) >> 1)];
+
+    // now that we have the row we just need to figure out the Y in the column where the pixel will go
+    // every column consists of 8 bytes, so for example a pixel in column 7 should go into byte 0, bit 6
+    // another example, column 18 is byte 2, bit 1
+    // first we have to rsh3 the column number to get the correct offset in the row, then set the bit for the correct number
+    // to find the correct bit we modulo by 8, minus one
+
+    *(pRow + ((col - 1) >> 3)) |= (1 << ((col % 8) - 1));
 }
 
 static void dispToggleDMA(bool enable)
