@@ -22,45 +22,89 @@
 // Defines
 //=====================================================================================================================
 
-#define SSD1306_WIDTH           128
-#define SSD1306_HEIGHT          64
+#define SSD1309_WIDTH             128
+#define SSD1309_HEIGHT            64
 
-#define SSD1306_ADDR            0x78
+#define SSD1309_PAGE_SIZE_BYTES   128
+#define SSD1309_ROW_SIZE_BYTES    16
+#define SSD1309_GDDRAM_SIZE_BYTES 1024
 
-#define IS_MIRRORED_VERT             0
-#define IS_MIRRORED_HOR              1
+#define SSD1309_ADDR              0x78
+
+typedef union
+{
+    uint8_t page[SSD1309_PAGE_SIZE_BYTES];
+    uint8_t rows[8][SSD1309_ROW_SIZE_BYTES];
+} UPageRow_t;
+
+typedef union
+{
+    uint8_t buffer[SSD1309_GDDRAM_SIZE_BYTES];
+    UPageRow_t pages[8];
+} UFrameBuffer_t;
 
 //=====================================================================================================================
 // Globals
 //=====================================================================================================================
 
-static uint8_t g_framebuffer[(SSD1306_WIDTH * SSD1306_HEIGHT / 8) + 1] = { 0x40, 0 };
+static UFrameBuffer_t g_framebuffer = { 0 };
+
 static bool    dmaIsEnabled = false;
 
 static bool    dmaInProgress = false;
 static bool    nonDMAInProgress = false;
 
-static SI2CTransfer_t g_i2cTransfer = { .address = SSD1306_ADDR };
+static SI2CTransfer_t g_i2cTransfer = { .address = SSD1309_ADDR };
 
 uint8_t SSD1309_INIT_SEQ[] = {
     SSD1309_DISPLAY_OFF,
-    SSD1309_SET_DISPLAY_CLOCK_DIV, 0x80,
-    SSD1309_SET_MULTIPLEX, (SSD1306_HEIGHT - 1),
-    SSD1309_SET_DISPLAY_OFFSET, 0x00,
-    SSD1309_SET_START_LINE, 0x00,
-    SSD1309_CHARGE_PUMP, 0x14,
-    SSD1309_MEMORY_MODE, 0x00,      // 0x0 is horizontal, 0x1 is vertical
-    SSD1309_SEG_REMAP_NORMAL,       // Segment Remap Flip
-    SSD1309_COM_SCAN_DEC,           // Com Scan DEC
-    SSD1309_SET_COM_PINS, 0x12,
-    SSD1309_SET_CONTRAST, 0xFF,
-    SSD1309_SET_PRECHARGE, 0xC2,
-    SSD1309_SET_VCOM_DESELECT, 0x40,
-    SSD1309_DISPLAY_ALL_ON_RESUME,
-    SSD1309_NORMAL_DISPLAY,
+
+    SSD1309_SET_DISPLAY_CLOCK_DIV, 0xA0, // clock divide ratio (0x00=1) and oscillator frequency (0x8)
+    SSD1309_SET_START_LINE,
+    SSD1309_MEMORY_MODE, 0x00,
+    SSD1309_SEG_REMAP_FLIP,
+    SSD1309_COM_SCAN_DEC,
+    SSD1309_SET_COM_PINS, 0x12,          // alternative com pin config (bit 4), disable left/right remap (bit 5) -> datasheet option 5 with COM_SCAN_INC, 8 with COM_SCAN_DEC
+    SSD1309_SET_CONTRAST, 0x6F,
+    SSD1309_SET_PRECHARGE, 0xD3,         // precharge period 0x22/F1
+    SSD1309_SET_VCOM_DESELECT, 0x20,     // vcomh deselect level
+
     SSD1309_DEACTIVATE_SCROLL,
+    SSD1309_DISPLAY_ALL_ON_RESUME,       // normal mode: ram -> display
+    SSD1309_NORMAL_DISPLAY,              // non-inverted mode
+
+    // only do this once: we send the entire framebuffer every time using DMA
+    SSD1309_COLUMN_START_ADDRESS_LOW_NIBBLE | 0x00,
+    SSD1309_COLUMN_START_ADDRESS_HI_NIBBLE  | 0x00,
+    SSD1309_SET_PAGE_START_ADDRESS          | 0x00,
+
     SSD1309_DISPLAY_ON
 };
+
+uint8_t SSD1309_FLIP0_SEQ[] = {
+    SSD1309_SEG_REMAP_FLIP,
+    SSD1309_COM_SCAN_DEC
+};
+
+uint8_t SSD1309_FLIP0_SEQ[] = {
+    SSD1309_SEG_REMAP_NORMAL,
+    SSD1309_COM_SCAN_INC
+};
+
+// FOR DATASHEET MODE 5:
+// page 0-3 are the even lines, page 4-7 are the odd lines
+// every page has 8 COM lines, so 64 lines in total (for a height of 64 pixels)
+// this also applies for mode 8, but in reverse
+
+// page 0 (COM 0-7)   == ROW 0-2-4-6-8-10-12-14         (0-127) (128 bytes, 16 per row)
+// page 1 (COM 8-15)  == ROW 16-18-20-22-24-26-28-30    (128-255)
+// page 2 (COM 16-23) == ROW 32-34-36-38-40-42-44-46    (256-383)
+// page 3 (COM 24-31) == ROW 48-50-52-54-56-58-60-62    (384-511)
+
+// page 4 (COM 32-39) == ROW 1-3-5-7-9-11-13-15         (512-639)
+// page 5 (COM 40-47) == ROW 17-19-21-23-25-27-29-31    (640-767)
+// page 6 (COM 48-55) == ROW 33-35-37-39-41-43-45-47    (768-895)
+// page 7 (COM 56-63) == ROW 49-51-53-55-57-59-61-63    (896-1023)
 
 //=====================================================================================================================
 // Static protos
@@ -71,7 +115,6 @@ static void dispToggleDMA(bool);
 
 static void dispWriteCommand(uint8_t);
 static void dispWriteFbuf(void);
-static void dispResetPointers(void);
 static void dispSyncFramebuffer(void);
 
 static void dispWriteMulti(uint8_t *, size_t);
@@ -81,76 +124,6 @@ static void dispI2RegularCallback(bool);
 //=====================================================================================================================
 // Functions
 //=====================================================================================================================
-
-static void subInit(void)
-{
-    dispWriteCommand(0xAE); /* Display off */
-
-    dispWriteCommand(0x20); /* Set Memory Addressing Mode */   
-    dispWriteCommand(0x10); /* 00,Horizontal Addressing Mode; 01,Vertical Addressing Mode; */
-                                /* 10,Page Addressing Mode (RESET); 11,Invalid */
-
-    dispWriteCommand(0xB0); /*Set Page Start Address for Page Addressing Mode, 0-7 */
-
-#ifdef SSD1309_MIRROR_VERT
-    dispWriteCommand(0xC0); /* Mirror vertically */
-#else
-    dispWriteCommand(0xC8); /* Set COM Output Scan Direction */
-#endif
-
-    dispWriteCommand(0x00); /*---set low column address  */
-    dispWriteCommand(0x10); /*---set high column address */
-
-    dispWriteCommand(0x40); /*--set start line address - CHECK */
-
-    dispWriteCommand(0x81); /*--set contrast control register - CHECK */
-    dispWriteCommand(0xFF);
-
-#ifdef SSD1309_MIRROR_HORIZ
-    dispWriteCommand(0xA0); /* Mirror horizontally */
-#else
-    dispWriteCommand(0xA1); /* --set segment re-map 0 to 127 - CHECK */
-#endif
-
-#ifdef SSD1309_INVERSE_COLOR
-    dispWriteCommand(0xA7); /*--set inverse color */
-#else
-    dispWriteCommand(0xA6); /*--set normal color */
-#endif
-
-/* Set multiplex ratio. */
-#if (SSD1309_HEIGHT == 128)
-    /* Found in the Luma Python lib for SH1106. */
-    ssd1306_WriteCommand(0xFF);
-#else
-    dispWriteCommand(0xA8); /*--set multiplex ratio(1 to 64) - CHECK */
-#endif
-
-    dispWriteCommand(0x3F);
-
-
-    dispWriteCommand(0xA4); /* 0xA4, Output follows RAM content;0xa5,Output ignores RAM content */
-
-    dispWriteCommand(0xD3); /*-set display offset - CHECK */
-    dispWriteCommand(0x00); /*-not offset */
-
-    dispWriteCommand(0xD5); /*--set display clock divide ratio/oscillator frequency */
-    dispWriteCommand(0xF0); /*--set divide ratio */
-
-    dispWriteCommand(0xD9); /*--set pre-charge period */
-    dispWriteCommand(0x22); /*			  */
-
-    dispWriteCommand(0xDA); /*--set com pins hardware configuration - CHECK */
-    dispWriteCommand(0x12);
-
-    dispWriteCommand(0xDB); /*--set vcomh */
-    dispWriteCommand(0x20); /* 0x20, 0.77xVcc */ 
-
-    dispWriteCommand(0x8D); /*--set DC-DC enable */
-    dispWriteCommand(0x14); /*                   */
-    dispWriteCommand(0xAF); /*--turn on SSD1309 panel */
-}
-
 
 void initDisplay(void)
 {
@@ -163,38 +136,38 @@ void initDisplay(void)
         dispWriteCommand(SSD1309_INIT_SEQ[i]);
     }
 
-    dispResetPointers();
-
-    //subInit();
-
-    //dispWriteCommand(0xA5);
-
-    dispToggleDMA(true);
-    memcpy(&g_framebuffer[1], logo, sizeof(logo) / sizeof(logo[0]));
-    dispSyncFramebuffer();
-
-    while (nonDMAInProgress) {};
-
-    memset(&g_framebuffer[1], 0xFF, 1024);
-
-    dispSyncFramebuffer();
-
-    while (dmaInProgress) {};
-
-    __asm("nop");
-
-    //memcpy(&g_framebuffer[1], logo, sizeof(logo) / sizeof(logo[0]));
-
-    //dispSyncFramebuffer();
-
-    //while (dmaInProgress) {};
-
     while(true);
 }
 
-void dispReset(void)
+/**
+ * @brief draw a pixel in the display.
+ * 
+ * offsets are based on 1,1. calculations are performed inside to ensure page alignment.
+ * 
+ * @param col column to draw in
+ * @param row row to draw in
+ */
+void dispDrawPixel(uint8_t col, uint8_t row)
 {
+    // we use 1,1 as the origin, so always subtract 1 for correct calculations
+    // we need the original number so do the calculation inline
+    if (((row - 1) % 2) == 0)
+    {
+        // even: page 0-3. rsh4 gives us the correct page
+        size_t page = (row - 1) >> 4;
 
+        // if we multiply this rsh value by 16 we get the offset (0, 16, 32, 48)
+        // if we subtract this from the original y position and rsh by 1 we get the right row to work on
+        uint8_t *pRow = &g_framebuffer.pages[(row - 1) >> 4].rows[(row - 1) - ((page * 16) >> 1)];
+
+        // now that we have the row we just need to figure out the Y in the column where the pixel will go
+        // every column consists of 8 bytes, so for example a pixel in column 7 should go into byte 0, bit 6
+        // another example, column 18 is byte 2, bit 1
+        // first we have to rsh3 the column number to get the correct offset in the row, then set the bit for the correct number
+        // to find the correct bit we modulo by 8, minus one
+
+        *(pRow + ((col - 1) >> 3)) |= (1 << ((col % 8) - 1));
+    }
 }
 
 static void dispToggleDMA(bool enable)
@@ -247,7 +220,7 @@ static void dispSyncFramebuffer(void)
 
     dmaInProgress = true;
     g_i2cTransfer.pBuffer = g_framebuffer;
-    g_i2cTransfer.len = 1025;
+    g_i2cTransfer.len = 1024;
 
     i2cTransferDisplayDMA(&g_i2cTransfer);
 }
@@ -256,7 +229,7 @@ static void dispWriteFbuf(void)
 {
     nonDMAInProgress = true;
     g_i2cTransfer.pBuffer = g_framebuffer;
-    g_i2cTransfer.len = 1025;
+    g_i2cTransfer.len = 1024;
 
     i2cTransmit(I2C2, &g_i2cTransfer);
 }

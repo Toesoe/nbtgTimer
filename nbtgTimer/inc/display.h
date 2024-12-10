@@ -23,10 +23,10 @@ extern "C"
 // Defines
 //=====================================================================================================================
 
-#define SSD1309_SET_START_LINE                       0x00
+#define SSD1309_SET_START_LINE                       0x40 // sets start line to 0
 #define SSD1309_MEMORY_MODE                          0x20 // 0x02 [reset] 0x00 - Horizontal addressing; 0x01 - Vertical addressing 0x02 - Page Addressing; 0x03 - Invalid
-#define SSD1309_COLUMN_ADDR                          0x21 // Used only when Memory Mode = 0x00 or 0x01 (start 0x00 end 0x7F [reset]);
-#define SSD1309_PAGE_ADDR                            0x22 // Used only when Memory Mode = 0x00 or 0x01 (start 0x00 end 0x07 [reset]);
+#define SSD1309_COLUMN_ADDR                          0x21 // used with horizontal or vertical addressing: { 0x21 0x00 0x7F } selects columns 0 to 127
+#define SSD1309_PAGE_ADDR                            0x22 // used with horizontal or vertical addressing: { 0x22 0x00 0x07 } selects pages 0 to 7
 
 #define SSD1309_RIGHT_HORIZONTAL_SCROLL              0x26
 #define SSD1309_LEFT_HORIZONTAL_SCROLL               0x27
@@ -60,6 +60,10 @@ extern "C"
 #define SSD1309_SET_PRECHARGE                        0xD9 // 0x02 [reset]
 #define SSD1309_SET_COM_PINS                         0xDA
 #define SSD1309_SET_VCOM_DESELECT                    0xDB
+
+#define SSD1309_COLUMN_START_ADDRESS_LOW_NIBBLE      0x00 // lower nibble: 0x00 and 0x10 make 0x00
+#define SSD1309_COLUMN_START_ADDRESS_HI_NIBBLE       0x10 // higher nibble
+#define SSD1309_SET_PAGE_START_ADDRESS               0xB0 // 0xB0 -> 0xB7 (page 0-7)
 
 //=====================================================================================================================
 // Functions
