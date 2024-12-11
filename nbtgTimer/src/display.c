@@ -136,6 +136,20 @@ void initDisplay(void)
         dispWriteCommand(SSD1309_INIT_SEQ[i]);
     }
 
+    for (size_t i = 0; i < SSD1309_HEIGHT; i += 4)
+    {
+        for (size_t j = 0; j < SSD1309_WIDTH; j += 4)
+        {
+            dispDrawPixel(j, i);
+        }
+    }
+
+    dispToggleDMA(true);
+
+    dispSyncFramebuffer();
+
+    while(dmaInProgress) {}
+
     while(true);
 }
 
@@ -144,33 +158,45 @@ void initDisplay(void)
  * 
  * offsets are based on 1,1. calculations are performed inside to ensure page alignment.
  * 
- * @param col column to draw in
- * @param row row to draw in
+ * @param col column to draw in (x)
+ * @param row row to draw in (y)
  */
 void dispDrawPixel(uint8_t col, uint8_t row)
 {
-    // we use 1,1 as the origin, so always subtract 1 for correct calculations
-    // we need the original number so do the calculation inline
+    // rsh4 gives us the correct page from 0-3
+    size_t page = row >> 4;
+    size_t offset = (page << 4) + 1; // either 0, 16, 32, 48: sub this from (row >> 1)
+    size_t uneven = 0;
 
-    // page 0-3. rsh4 gives us the correct page
-    size_t page = (row - 1) >> 4;
-
+    // coordinates start at 1, but calculation at 0
     if (((row - 1) % 2) == 0)
     {
         // when uneven, start at page 4.
         page += 4;
+        uneven = 1;
+        offset -= 1; // don't sub the offset for uneven numbers
     }
 
     // if we multiply this rsh value by 16 we get the offset (0, 16, 32, 48)
     // if we subtract this from the original y position and rsh by 1 we get the right row to work on
-    uint8_t *pRow = &g_framebuffer.pages[(row - 1) >> 4].rows[(row - 1) - ((page * 16) >> 1)];
+    // for example, for (17, 13) we need to work on row 6 in page 0. div 2, round up
+    // and for (17, 36) we need to work on row 1 in page 6. sub 32, end up with 4 (y=3), div 2, do not round
+    
+    // (17, 13)                          0            13 -  1       >> 1  - 0       ( == 6)
+    // (17, 36)                          6            36 -  32      >> 1  - 1       ( == 1)
+    // (17, 62)                          7            62 -  48      >> 1  - 1       ( == 6)
+    // (17, 63)                          3            63 -  49      >> 1  - 0       ( == 7)
+    // (17, 64)                          7            64 -  48      >> 1  - 1       ( == 7)
+    uint8_t *pRow = &g_framebuffer.pages[page].rows[((row - offset) >> 1) - uneven];
 
     // now that we have the row we just need to figure out the Y in the column where the pixel will go
     // every column consists of 8 bytes, so for example a pixel in column 7 should go into byte 0, bit 6
     // another example, column 18 is byte 2, bit 1
     // first we have to rsh3 the column number to get the correct offset in the row, then set the bit for the correct number
     // to find the correct bit we modulo by 8, minus one
+    // (17, 13) would need to end up in byte 2, bit 1 TODO: verify endianness
 
+    //                2        |=  7F (01111111)
     *(pRow + ((col - 1) >> 3)) |= (1 << ((col % 8) - 1));
 }
 
