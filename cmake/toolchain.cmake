@@ -12,7 +12,7 @@ if (NOT DEFINED ENV{NBTG_TIMER_TOOLCHAIN})
     endif()
 
     if (CMAKE_HOST_WIN32)
-        set(TOOLCHAIN_PATH C:/SysGCC/arm-eabi/bin)
+        set(TOOLCHAIN_PATH C:/msys64/mingw64/bin)
     endif()
 
     message(WARNING "NBTG_TIMER_TOOLCHAIN environment variable is not set. Using default path ${TOOLCHAIN_PATH}")
@@ -31,10 +31,11 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON) # we need gnu ext for asm calls
-# set(CMAKE_VERBOSE_MAKEFILE ON) # enable this if you want to debug make issues
+#set(CMAKE_VERBOSE_MAKEFILE ON) # enable this if you want to debug make issues
 set(CMAKE_SYSTEM_NAME Generic)
 
 set(CMAKE_C_COMPILER_WORKS TRUE) # prevent errors on initial test compile
+set(CMAKE_CXX_COMPILER_WORKS TRUE)
 
 set(CMAKE_C_COMPILER        ${TOOLCHAIN_PATH}/arm-none-eabi-gcc${TOOL_SUFFIX} CACHE PATH "" FORCE)
 set(CMAKE_CXX_COMPILER      ${TOOLCHAIN_PATH}/arm-none-eabi-g++${TOOL_SUFFIX} CACHE PATH "" FORCE)

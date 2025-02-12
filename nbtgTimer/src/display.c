@@ -86,7 +86,7 @@ uint8_t SSD1309_FLIP0_SEQ[] = {
     SSD1309_COM_SCAN_DEC
 };
 
-uint8_t SSD1309_FLIP0_SEQ[] = {
+uint8_t SSD1309_FLIP1_SEQ[] = {
     SSD1309_SEG_REMAP_NORMAL,
     SSD1309_COM_SCAN_INC
 };
@@ -249,7 +249,7 @@ static void dispSyncFramebuffer(void)
     if (!dmaIsEnabled) return;
 
     dmaInProgress = true;
-    g_i2cTransfer.pBuffer = g_framebuffer;
+    g_i2cTransfer.pBuffer = g_framebuffer.buffer;
     g_i2cTransfer.len = 1024;
 
     i2cTransferDisplayDMA(&g_i2cTransfer);
@@ -258,7 +258,7 @@ static void dispSyncFramebuffer(void)
 static void dispWriteFbuf(void)
 {
     nonDMAInProgress = true;
-    g_i2cTransfer.pBuffer = g_framebuffer;
+    g_i2cTransfer.pBuffer = g_framebuffer.buffer;
     g_i2cTransfer.len = 1024;
 
     i2cTransmit(I2C2, &g_i2cTransfer);
