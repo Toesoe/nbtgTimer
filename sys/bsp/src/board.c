@@ -42,6 +42,9 @@ STimerDef_t timer14 = {TIM14, 100};
 SI2CPinDef_t g_R1_eepromI2C = {I2C1, { LL_GPIO_PIN_7, GPIOB }, { LL_GPIO_PIN_6, GPIOB }, { LL_GPIO_PIN_5, GPIOB }, LL_GPIO_AF_6 };
 SI2CPinDef_t g_R1_dispI2C   = {I2C2, { LL_GPIO_PIN_11, GPIOB }, { LL_GPIO_PIN_10, GPIOB }, {0, 0}                , LL_GPIO_AF_6 }; // OPT1 and OPT2 on schematic
 
+// SPI:
+SSPIPinDef_t g_R1_dispSPI   = {SPI2, { LL_GPIO_PIN_12, GPIOB }, { LL_GPIO_PIN_13, GPIOB }, { LL_GPIO_PIN_14, GPIOB }, { LL_GPIO_PIN_15, GPIOB }, {LL_GPIO_PIN_11, GPIOB}, LL_GPIO_AF_0};
+
 // Generic
 SGenericGPIOPin_t    g_R1_button10SecPlus       = {{ LL_GPIO_PIN_7, GPIOA }, false }; // SW4
 SGenericGPIOPin_t    g_R1_button10SecMinus      = {{ LL_GPIO_PIN_6, GPIOA }, false }; // SW7
@@ -60,6 +63,7 @@ SGenericGPIOPin_t    g_R1_pinBuzzer             = {{ LL_GPIO_PIN_8, GPIOB }, tru
 STimerPeriphPinDef_t g_timerRev1PeriphPins      = {
          &g_R1_eepromI2C,
          &g_R1_dispI2C,
+         &g_R1_dispSPI
 };
 
 STimerGenericPinDef_t g_timerRev1GenericPins = {
@@ -110,6 +114,7 @@ void initBoard(void)
 
     i2cInit(g_R1_eepromI2C.pPeripheral, I2C_100KHZ, false);
     i2cInit(g_R1_dispI2C.pPeripheral, I2C_1MHZ, true);
+    spiInit(g_R1_dispSPI.pPeripheral);
 }
 
 //=====================================================================================================================

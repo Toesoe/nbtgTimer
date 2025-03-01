@@ -29,7 +29,11 @@
 #define SSD1309_ROW_SIZE_BYTES    16
 #define SSD1309_GDDRAM_SIZE_BYTES 1024
 
-#define SSD1309_ADDR              0x78
+#define SSD1309_I2C_ADDR          0x78
+
+//=====================================================================================================================
+// Types
+//=====================================================================================================================
 
 typedef union
 {
@@ -43,18 +47,22 @@ typedef union
     UPageRow_t pages[8];
 } UFrameBuffer_t;
 
+typedef struct
+{
+    EDisplayMode_t mode;
+    bool DMAIsEnabled;
+    bool DMAInProgress;
+    bool nonDMAInProgress;
+} SDisplayControl_t;
+
 //=====================================================================================================================
 // Globals
 //=====================================================================================================================
 
 static UFrameBuffer_t g_framebuffer = { 0 };
+static SI2CTransfer_t g_i2cTransfer = { .address = SSD1309_I2C_ADDR };
 
-static bool    dmaIsEnabled = false;
-
-static bool    dmaInProgress = false;
-static bool    nonDMAInProgress = false;
-
-static SI2CTransfer_t g_i2cTransfer = { .address = SSD1309_ADDR };
+static SDisplayControl_t g_displayState = { 0 };
 
 uint8_t SSD1309_INIT_SEQ[] = {
     SSD1309_DISPLAY_OFF,
@@ -118,19 +126,32 @@ static void dispWriteFbuf(void);
 static void dispSyncFramebuffer(void);
 
 static void dispWriteMulti(uint8_t *, size_t);
-static void dispI2CDMACallback(bool);
-static void dispI2RegularCallback(bool);
+static void dispDMACallback(bool);
+static void dispRegularCallback(bool);
 
 //=====================================================================================================================
 // Functions
 //=====================================================================================================================
 
-void initDisplay(void)
+void initDisplay(EDisplayMode_t displayMode)
 {
-    i2cRegisterCallback(dispI2RegularCallback);
+    g_displayState.mode = displayMode;
+    g_displayState.DMAInProgress = false;
+    g_displayState.DMAIsEnabled = false;
+    g_displayState.nonDMAInProgress = false;
 
-    i2cInitDisplayDMA(dispI2CDMACallback);
+    if (displayMode == MODE_I2C)
+    {
+        i2cRegisterCallback(dispRegularCallback);
+        i2cInitDisplayDMA(dispDMACallback);
+    }
+    else
+    {
+        // SPI stuff
+        spiInitDisplayDMA(dispDMACallback);
+    }
 
+    // TODO: this doesn't work for SPI! need to combine commands with parameters. create type?
     for (size_t i = 0; i < sizeof(SSD1309_INIT_SEQ) / sizeof(SSD1309_INIT_SEQ[0]); i++)
     {
         dispWriteCommand(SSD1309_INIT_SEQ[i]);
@@ -148,13 +169,13 @@ void initDisplay(void)
 
     dispSyncFramebuffer();
 
-    while(dmaInProgress) {}
+    while(g_displayState.DMAInProgress) {}
 
     while(true);
 }
 
 /**
- * @brief draw a pixel in the display.
+ * @brief draw a pixel in the display buffer
  * 
  * offsets are based on 1,1. calculations are performed inside to ensure page alignment.
  * 
@@ -187,7 +208,7 @@ void dispDrawPixel(uint8_t col, uint8_t row)
     // (17, 62)                          7            62 -  48      >> 1  - 1       ( == 6)
     // (17, 63)                          3            63 -  49      >> 1  - 0       ( == 7)
     // (17, 64)                          7            64 -  48      >> 1  - 1       ( == 7)
-    uint8_t *pRow = &g_framebuffer.pages[page].rows[((row - offset) >> 1) - uneven];
+    uint8_t *pRow = g_framebuffer.pages[page].rows[((row - offset) >> 1) - uneven];
 
     // now that we have the row we just need to figure out the Y in the column where the pixel will go
     // every column consists of 8 bytes, so for example a pixel in column 7 should go into byte 0, bit 6
@@ -202,20 +223,13 @@ void dispDrawPixel(uint8_t col, uint8_t row)
 
 static void dispToggleDMA(bool enable)
 {
-    dmaIsEnabled = enable;
+    g_displayState.DMAIsEnabled = enable;
 }
 
 static void dispWriteCommand(uint8_t cmd)
 {
     uint8_t buf[] = { 0x00, cmd };
-
-    nonDMAInProgress = true;
-    g_i2cTransfer.pBuffer = buf;
-    g_i2cTransfer.len = 2;
-
-    i2cTransmit(I2C2, &g_i2cTransfer);
-
-    while (nonDMAInProgress) {}; // await cmd transaction finish
+    spiSendCommand(buf, 2);
 }
 
 static void dispResetPointers(void)
@@ -223,21 +237,8 @@ static void dispResetPointers(void)
     uint8_t buf[] = { 0x00, SSD1309_COLUMN_ADDR, 0x00, 0x7F };
     uint8_t buf2[] = { 0x00, SSD1309_PAGE_ADDR, 0x00, 0x07 };
 
-    nonDMAInProgress = true;
-    g_i2cTransfer.pBuffer = buf;
-    g_i2cTransfer.len = 4;
-
-    i2cTransmit(I2C2, &g_i2cTransfer);
-
-    while (nonDMAInProgress) {};
-
-    nonDMAInProgress = true;
-    g_i2cTransfer.pBuffer = buf2;
-    g_i2cTransfer.len = 4;
-
-    i2cTransmit(I2C2, &g_i2cTransfer);
-
-    while (nonDMAInProgress) {};
+    spiSendCommand(buf, 4);
+    spiSendCommand(buf2, 4);
 }
 
 /**
@@ -246,9 +247,9 @@ static void dispResetPointers(void)
  */
 static void dispSyncFramebuffer(void)
 {
-    if (!dmaIsEnabled) return;
+    if (!g_displayState.DMAIsEnabled) return;
 
-    dmaInProgress = true;
+    g_displayState.DMAInProgress = true;
     g_i2cTransfer.pBuffer = g_framebuffer.buffer;
     g_i2cTransfer.len = 1024;
 
@@ -257,19 +258,16 @@ static void dispSyncFramebuffer(void)
 
 static void dispWriteFbuf(void)
 {
-    nonDMAInProgress = true;
-    g_i2cTransfer.pBuffer = g_framebuffer.buffer;
-    g_i2cTransfer.len = 1024;
-
-    i2cTransmit(I2C2, &g_i2cTransfer);
+    g_displayState.nonDMAInProgress = true;
+    spiWriteData(g_framebuffer.buffer, 1024);
 }
 
-static void dispI2CDMACallback(bool isComplete)
+static void dispDMACallback(bool isComplete)
 {
-    dmaInProgress = false;
+    g_displayState.DMAInProgress = false;
 }
 
-static void dispI2RegularCallback(bool isComplete)
+static void dispRegularCallback(bool isComplete)
 {
-    nonDMAInProgress = false;
+    g_displayState.nonDMAInProgress = false;
 }

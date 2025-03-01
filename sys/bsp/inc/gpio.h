@@ -55,6 +55,7 @@ typedef struct
     SGPIOPin_t   sckPin;
     SGPIOPin_t   misoPin;
     SGPIOPin_t   mosiPin;
+    SGPIOPin_t   dcPin; // for display in SPI mode, the D/C pin is used to distinguish commands and data
     uint32_t     pinAFMode;
 } SSPIPinDef_t;
 
@@ -84,6 +85,9 @@ typedef struct
     // I2C
     SI2CPinDef_t *pI2cEepromPinDef;
     SI2CPinDef_t *pI2cDispPinDef;
+
+    // SPI
+    SSPIPinDef_t *pSpiDisplayDef;
 } STimerPeriphPinDef_t;
 
 /** @brief struct to specify generic pin definitions */
@@ -118,6 +122,7 @@ void initGPIO_generic(STimerGenericPinDef_t *);
 
 void toggleEepromWP(bool);
 void toggleOptocoupler(bool);
+void toggleDisplayDataCommand(bool);
 
 #ifdef __cplusplus
 }

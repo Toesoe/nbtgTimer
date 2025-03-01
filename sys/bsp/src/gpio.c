@@ -58,6 +58,7 @@ void initGPIO_peripherals(STimerPeriphPinDef_t *pPinDefs)
 
     initGPIO_I2C(g_pCurrentPeriphPinDefs->pI2cDispPinDef);
     initGPIO_I2C(g_pCurrentPeriphPinDefs->pI2cEepromPinDef);
+    initGPIO_SPI(g_pCurrentPeriphPinDefs->pSpiDisplayDef);
 }
 
 
@@ -93,6 +94,14 @@ void toggleOptocoupler(bool enableOutput)
                                         g_pCurrentGenericPinDefs->pPinOptocoupler->pinPort.pin) :
                    LL_GPIO_ResetOutputPin(g_pCurrentGenericPinDefs->pPinOptocoupler->pinPort.port,
                                           g_pCurrentGenericPinDefs->pPinOptocoupler->pinPort.pin);
+}
+
+void toggleDisplayDataCommand(bool isCommand)
+{
+    isCommand ? LL_GPIO_ResetOutputPin(g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.port,
+                                    g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.pin) :
+                LL_GPIO_SetOutputPin(g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.port,
+                                    g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.pin);
 }
 
 //=====================================================================================================================
@@ -178,6 +187,9 @@ static void initGPIO_SPI(SSPIPinDef_t *pSPIDef)
     spiGpio.Pin = pSPIDef->csPin.pin;
     spiGpio.Mode = LL_GPIO_MODE_OUTPUT; // no AF: CS is done in SW
     LL_GPIO_Init(pSPIDef->csPin.port, &spiGpio);
+
+    spiGpio.Pin = pSPIDef->dcPin.pin;
+    LL_GPIO_Init(pSPIDef->dcPin.port, &spiGpio);
 }
 
 static void initGPIO_Generic(SGenericGPIOPin_t *pGenericPinDef)
