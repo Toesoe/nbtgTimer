@@ -80,6 +80,7 @@ typedef enum
 //=====================================================================================================================
 
 void initDisplay(EDisplayMode_t);
+void dispDrawPixel(uint8_t, uint8_t);
 
 #ifdef __cplusplus
 }

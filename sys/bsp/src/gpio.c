@@ -13,11 +13,11 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-
 #include <stm32g0xx_ll_bus.h>
 #include <stm32g0xx_ll_exti.h>
-#include <stm32g0xx_ll_utils.h>
 #include <stm32g0xx_ll_gpio.h>
+#include <stm32g0xx_ll_utils.h>
+
 
 //=====================================================================================================================
 // Defines
@@ -33,7 +33,7 @@
 // Globals
 //=====================================================================================================================
 
-static STimerPeriphPinDef_t *g_pCurrentPeriphPinDefs = NULL;
+static STimerPeriphPinDef_t  *g_pCurrentPeriphPinDefs  = NULL;
 static STimerGenericPinDef_t *g_pCurrentGenericPinDefs = NULL;
 
 //=====================================================================================================================
@@ -61,7 +61,6 @@ void initGPIO_peripherals(STimerPeriphPinDef_t *pPinDefs)
     initGPIO_SPI(g_pCurrentPeriphPinDefs->pSpiDisplayDef);
 }
 
-
 void initGPIO_generic(STimerGenericPinDef_t *pPinDefs)
 {
     g_pCurrentGenericPinDefs = pPinDefs;
@@ -83,9 +82,9 @@ void initGPIO_generic(STimerGenericPinDef_t *pPinDefs)
 void toggleEepromWP(bool disableWP)
 {
     disableWP ? LL_GPIO_ResetOutputPin(g_pCurrentPeriphPinDefs->pI2cEepromPinDef->wpPin.port,
-                                    g_pCurrentPeriphPinDefs->pI2cEepromPinDef->wpPin.pin) :
-               LL_GPIO_SetOutputPin(g_pCurrentPeriphPinDefs->pI2cEepromPinDef->wpPin.port,
-                                      g_pCurrentPeriphPinDefs->pI2cEepromPinDef->wpPin.pin);
+                                       g_pCurrentPeriphPinDefs->pI2cEepromPinDef->wpPin.pin) :
+                LL_GPIO_SetOutputPin(g_pCurrentPeriphPinDefs->pI2cEepromPinDef->wpPin.port,
+                                     g_pCurrentPeriphPinDefs->pI2cEepromPinDef->wpPin.pin);
 }
 
 void toggleOptocoupler(bool enableOutput)
@@ -99,9 +98,17 @@ void toggleOptocoupler(bool enableOutput)
 void toggleDisplayDataCommand(bool isCommand)
 {
     isCommand ? LL_GPIO_ResetOutputPin(g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.port,
-                                    g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.pin) :
+                                       g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.pin) :
                 LL_GPIO_SetOutputPin(g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.port,
-                                    g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.pin);
+                                     g_pCurrentPeriphPinDefs->pSpiDisplayDef->dcPin.pin);
+}
+
+void resetDisplay(bool assertLine)
+{
+    assertLine ? LL_GPIO_ResetOutputPin(g_pCurrentPeriphPinDefs->pSpiDisplayDef->rstPin.port,
+                                       g_pCurrentPeriphPinDefs->pSpiDisplayDef->rstPin.pin) :
+                LL_GPIO_SetOutputPin(g_pCurrentPeriphPinDefs->pSpiDisplayDef->rstPin.port,
+                                     g_pCurrentPeriphPinDefs->pSpiDisplayDef->rstPin.pin);
 }
 
 //=====================================================================================================================
@@ -114,12 +121,12 @@ void toggleDisplayDataCommand(bool isCommand)
 static void initGPIO_RS232(SUSARTPinDef_t *pUSARTDef)
 {
     LL_GPIO_InitTypeDef consoleGpio = {
-        .Pin = pUSARTDef->txPin.pin,
-        .Mode = LL_GPIO_MODE_ALTERNATE,
-        .Speed = LL_GPIO_SPEED_FREQ_HIGH,
+        .Pin        = pUSARTDef->txPin.pin,
+        .Mode       = LL_GPIO_MODE_ALTERNATE,
+        .Speed      = LL_GPIO_SPEED_FREQ_HIGH,
         .OutputType = LL_GPIO_OUTPUT_PUSHPULL,
-        .Pull = LL_GPIO_PULL_NO, // HW pullup
-        .Alternate = pUSARTDef->pinAFMode,
+        .Pull       = LL_GPIO_PULL_NO, // HW pullup
+        .Alternate  = pUSARTDef->pinAFMode,
     };
 
     LL_GPIO_Init(pUSARTDef->txPin.port, &consoleGpio);
@@ -130,18 +137,18 @@ static void initGPIO_RS232(SUSARTPinDef_t *pUSARTDef)
 
 /**
  * @brief initialize I2C GPIOs
- * 
+ *
  * TODO: doublecheck if necessary
  */
 static void initGPIO_I2C(SI2CPinDef_t *pI2CDef)
 {
     LL_GPIO_InitTypeDef i2cGpio = {
-        .Pin = pI2CDef->sclPin.pin,
-        .Mode = LL_GPIO_MODE_ALTERNATE,
-        .Speed = LL_GPIO_SPEED_FREQ_VERY_HIGH,
+        .Pin        = pI2CDef->sclPin.pin,
+        .Mode       = LL_GPIO_MODE_ALTERNATE,
+        .Speed      = LL_GPIO_SPEED_FREQ_VERY_HIGH,
         .OutputType = LL_GPIO_OUTPUT_OPENDRAIN,
-        .Pull = LL_GPIO_PULL_NO, // HW pullup
-        .Alternate = pI2CDef->pinAFMode,
+        .Pull       = LL_GPIO_PULL_NO, // HW pullup
+        .Alternate  = pI2CDef->pinAFMode,
     };
 
     LL_GPIO_Init(pI2CDef->sclPin.port, &i2cGpio);
@@ -154,9 +161,9 @@ static void initGPIO_I2C(SI2CPinDef_t *pI2CDef)
 
     if (pI2CDef->wpPin.pin != 0)
     {
-        i2cGpio.Mode = LL_GPIO_MODE_OUTPUT;
+        i2cGpio.Mode       = LL_GPIO_MODE_OUTPUT;
         i2cGpio.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
-        i2cGpio.Pin = pI2CDef->wpPin.pin;
+        i2cGpio.Pin        = pI2CDef->wpPin.pin;
         LL_GPIO_Init(pI2CDef->wpPin.port, &i2cGpio);
     }
 }
@@ -168,12 +175,12 @@ static void initGPIO_I2C(SI2CPinDef_t *pI2CDef)
 static void initGPIO_SPI(SSPIPinDef_t *pSPIDef)
 {
     LL_GPIO_InitTypeDef spiGpio = {
-        .Pin = pSPIDef->sckPin.pin,
-        .Mode = LL_GPIO_MODE_ALTERNATE,
-        .Speed = LL_GPIO_SPEED_FREQ_HIGH,
+        .Pin        = pSPIDef->sckPin.pin,
+        .Mode       = LL_GPIO_MODE_ALTERNATE,
+        .Speed      = LL_GPIO_SPEED_FREQ_HIGH,
         .OutputType = LL_GPIO_OUTPUT_PUSHPULL,
-        .Pull = LL_GPIO_PULL_NO, // HW pullup
-        .Alternate = pSPIDef->pinAFMode,
+        .Pull       = LL_GPIO_PULL_NO, // HW pullup
+        .Alternate  = pSPIDef->pinAFMode,
     };
 
     LL_GPIO_Init(pSPIDef->sckPin.port, &spiGpio);
@@ -184,7 +191,7 @@ static void initGPIO_SPI(SSPIPinDef_t *pSPIDef)
     spiGpio.Pin = pSPIDef->mosiPin.pin;
     LL_GPIO_Init(pSPIDef->mosiPin.port, &spiGpio);
 
-    spiGpio.Pin = pSPIDef->csPin.pin;
+    spiGpio.Pin  = pSPIDef->csPin.pin;
     spiGpio.Mode = LL_GPIO_MODE_OUTPUT; // no AF: CS is done in SW
     LL_GPIO_Init(pSPIDef->csPin.port, &spiGpio);
 
@@ -195,11 +202,11 @@ static void initGPIO_SPI(SSPIPinDef_t *pSPIDef)
 static void initGPIO_Generic(SGenericGPIOPin_t *pGenericPinDef)
 {
     LL_GPIO_InitTypeDef gpio = {
-        .Pin = pGenericPinDef->pinPort.pin,
-        .Mode = pGenericPinDef->isOutput,
-        .Speed = LL_GPIO_SPEED_FREQ_HIGH,
+        .Pin        = pGenericPinDef->pinPort.pin,
+        .Mode       = pGenericPinDef->isOutput,
+        .Speed      = LL_GPIO_SPEED_FREQ_HIGH,
         .OutputType = LL_GPIO_OUTPUT_PUSHPULL,
-        .Pull = LL_GPIO_PULL_NO,
+        .Pull       = LL_GPIO_PULL_NO,
     };
 
     LL_GPIO_Init(pGenericPinDef->pinPort.port, &gpio);

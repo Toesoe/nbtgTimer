@@ -27,8 +27,8 @@
 // Globals
 //=====================================================================================================================
 
-static StaticTask_t tskMgrBuf;
-static StackType_t  tskMgrStack[TASKMGR_TASK_STACK_SIZE * sizeof(StackType_t)];
+//static StaticTask_t tskMgrBuf;
+//static StackType_t  tskMgrStack[TASKMGR_TASK_STACK_SIZE * sizeof(StackType_t)];
 
 //=====================================================================================================================
 // Functions
@@ -39,5 +39,5 @@ int main(void)
 {
     initBoard();
 
-    initDisplay();
+    initDisplay(MODE_SPI);
 }

@@ -10,13 +10,13 @@
 //=====================================================================================================================
 
 #include "display.h"
-#include "images.h"
-
-#include "board.h"
-
-#include <string.h>
 
 #include <stm32g0xx_ll_system.h>
+#include <string.h>
+
+#include "board.h"
+#include "images.h"
+
 
 //=====================================================================================================================
 // Defines
@@ -43,60 +43,70 @@ typedef union
 
 typedef union
 {
-    uint8_t buffer[SSD1309_GDDRAM_SIZE_BYTES];
+    uint8_t    buffer[SSD1309_GDDRAM_SIZE_BYTES];
     UPageRow_t pages[8];
 } UFrameBuffer_t;
 
 typedef struct
 {
     EDisplayMode_t mode;
-    bool DMAIsEnabled;
-    bool DMAInProgress;
-    bool nonDMAInProgress;
+    bool           DMAIsEnabled;
+    bool           DMAInProgress;
+    bool           nonDMAInProgress;
 } SDisplayControl_t;
+
+typedef struct
+{
+    uint8_t command;
+    uint8_t parameter;
+    bool    hasParameter;
+} SDisplayCommand_t;
 
 //=====================================================================================================================
 // Globals
 //=====================================================================================================================
 
-static UFrameBuffer_t g_framebuffer = { 0 };
-static SI2CTransfer_t g_i2cTransfer = { .address = SSD1309_I2C_ADDR };
+static UFrameBuffer_t    g_framebuffer      = { 0 };
+static SI2CTransfer_t    g_i2cTransfer      = { .address = SSD1309_I2C_ADDR };
 
-static SDisplayControl_t g_displayState = { 0 };
+static SDisplayControl_t g_displayState     = { 0 };
 
-uint8_t SSD1309_INIT_SEQ[] = {
-    SSD1309_DISPLAY_OFF,
+SDisplayCommand_t        SSD1309_INIT_SEQ[] = {
+    (SDisplayCommand_t){ SSD1309_DISPLAY_OFF,                            0x00, false },
 
-    SSD1309_SET_DISPLAY_CLOCK_DIV, 0xA0, // clock divide ratio (0x00=1) and oscillator frequency (0x8)
-    SSD1309_SET_START_LINE,
-    SSD1309_MEMORY_MODE, 0x00,
-    SSD1309_SEG_REMAP_FLIP,
-    SSD1309_COM_SCAN_DEC,
-    SSD1309_SET_COM_PINS, 0x12,          // alternative com pin config (bit 4), disable left/right remap (bit 5) -> datasheet option 5 with COM_SCAN_INC, 8 with COM_SCAN_DEC
-    SSD1309_SET_CONTRAST, 0x6F,
-    SSD1309_SET_PRECHARGE, 0xD3,         // precharge period 0x22/F1
-    SSD1309_SET_VCOM_DESELECT, 0x20,     // vcomh deselect level
+    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_CLOCK_DIV,                  0xA0,
+                        true                                                         }, // clock divide ratio (0x00=1) and oscillator frequency (0x8)
+    (SDisplayCommand_t){ SSD1309_SET_START_LINE,                         0x00, false },
+    (SDisplayCommand_t){ SSD1309_MEMORY_MODE,                            0x00, true  },
+    (SDisplayCommand_t){ SSD1309_SEG_REMAP_FLIP,                         0x00, false },
+    (SDisplayCommand_t){ SSD1309_COM_SCAN_DEC,                           0x00, false },
+    (SDisplayCommand_t){ SSD1309_SET_COM_PINS,                           0x12,
+                        true                                                         }, // alternative com pin config (bit 4), disable left/right remap (bit 5) -> datasheet
+    // option 5 with COM_SCAN_INC, 8 with COM_SCAN_DEC
+    (SDisplayCommand_t){ SSD1309_SET_CONTRAST,                           0x6F, true  },
+    (SDisplayCommand_t){ SSD1309_SET_PRECHARGE,                          0xD3, true  }, // precharge period 0x22/F1
+    (SDisplayCommand_t){ SSD1309_SET_VCOM_DESELECT,                      0x20, true  }, // vcomh deselect level
 
-    SSD1309_DEACTIVATE_SCROLL,
-    SSD1309_DISPLAY_ALL_ON_RESUME,       // normal mode: ram -> display
-    SSD1309_NORMAL_DISPLAY,              // non-inverted mode
+    (SDisplayCommand_t){ SSD1309_DEACTIVATE_SCROLL,                      0x00, false },
+    (SDisplayCommand_t){ SSD1309_DISPLAY_ALL_ON_RESUME,                  0x00, false }, // normal mode: ram -> display
+    (SDisplayCommand_t){ SSD1309_NORMAL_DISPLAY,                         0x00, false }, // non-inverted mode
 
     // only do this once: we send the entire framebuffer every time using DMA
-    SSD1309_COLUMN_START_ADDRESS_LOW_NIBBLE | 0x00,
-    SSD1309_COLUMN_START_ADDRESS_HI_NIBBLE  | 0x00,
-    SSD1309_SET_PAGE_START_ADDRESS          | 0x00,
+    (SDisplayCommand_t){ SSD1309_COLUMN_START_ADDRESS_LOW_NIBBLE | 0x00, 0x00, false },
+    (SDisplayCommand_t){ SSD1309_COLUMN_START_ADDRESS_HI_NIBBLE | 0x00,  0x00, false },
+    (SDisplayCommand_t){ SSD1309_SET_PAGE_START_ADDRESS | 0x00,          0x00, false },
 
-    SSD1309_DISPLAY_ON
+    (SDisplayCommand_t){ SSD1309_DISPLAY_ON,                             0x00, false },
 };
 
-uint8_t SSD1309_FLIP0_SEQ[] = {
-    SSD1309_SEG_REMAP_FLIP,
-    SSD1309_COM_SCAN_DEC
+SDisplayCommand_t SSD1309_FLIP0_SEQ[] = {
+    (SDisplayCommand_t){ SSD1309_SEG_REMAP_FLIP, 0x00, false },
+    (SDisplayCommand_t){ SSD1309_COM_SCAN_DEC,   0x00, false },
 };
 
-uint8_t SSD1309_FLIP1_SEQ[] = {
-    SSD1309_SEG_REMAP_NORMAL,
-    SSD1309_COM_SCAN_INC
+SDisplayCommand_t SSD1309_FLIP1_SEQ[] = {
+    (SDisplayCommand_t){ SSD1309_SEG_REMAP_NORMAL, 0x00, false },
+    (SDisplayCommand_t){ SSD1309_COM_SCAN_INC,     0x00, false },
 };
 
 // FOR DATASHEET MODE 5:
@@ -118,10 +128,9 @@ uint8_t SSD1309_FLIP1_SEQ[] = {
 // Static protos
 //=====================================================================================================================
 
-static void dispConfigureDMA(void);
 static void dispToggleDMA(bool);
 
-static void dispWriteCommand(uint8_t);
+static void dispWriteCommand(SDisplayCommand_t);
 static void dispWriteFbuf(void);
 static void dispSyncFramebuffer(void);
 
@@ -135,9 +144,9 @@ static void dispRegularCallback(bool);
 
 void initDisplay(EDisplayMode_t displayMode)
 {
-    g_displayState.mode = displayMode;
-    g_displayState.DMAInProgress = false;
-    g_displayState.DMAIsEnabled = false;
+    g_displayState.mode             = displayMode;
+    g_displayState.DMAInProgress    = false;
+    g_displayState.DMAIsEnabled     = false;
     g_displayState.nonDMAInProgress = false;
 
     if (displayMode == MODE_I2C)
@@ -149,9 +158,12 @@ void initDisplay(EDisplayMode_t displayMode)
     {
         // SPI stuff
         spiInitDisplayDMA(dispDMACallback);
+        resetDisplay(true);
+        timerDelay(TIM14, 5); // 500ms delay
+        resetDisplay(false);
+        timerDelay(TIM14, 5); // 500ms delay TODO: make actual delay timer function
     }
 
-    // TODO: this doesn't work for SPI! need to combine commands with parameters. create type?
     for (size_t i = 0; i < sizeof(SSD1309_INIT_SEQ) / sizeof(SSD1309_INIT_SEQ[0]); i++)
     {
         dispWriteCommand(SSD1309_INIT_SEQ[i]);
@@ -169,23 +181,25 @@ void initDisplay(EDisplayMode_t displayMode)
 
     dispSyncFramebuffer();
 
-    while(g_displayState.DMAInProgress) {}
+    while (g_displayState.DMAInProgress)
+    {}
 
-    while(true);
+    while (true)
+        ;
 }
 
 /**
  * @brief draw a pixel in the display buffer
- * 
+ *
  * offsets are based on 1,1. calculations are performed inside to ensure page alignment.
- * 
+ *
  * @param col column to draw in (x)
  * @param row row to draw in (y)
  */
 void dispDrawPixel(uint8_t col, uint8_t row)
 {
     // rsh4 gives us the correct page from 0-3
-    size_t page = row >> 4;
+    size_t page   = row >> 4;
     size_t offset = (page << 4) + 1; // either 0, 16, 32, 48: sub this from (row >> 1)
     size_t uneven = 0;
 
@@ -202,7 +216,7 @@ void dispDrawPixel(uint8_t col, uint8_t row)
     // if we subtract this from the original y position and rsh by 1 we get the right row to work on
     // for example, for (17, 13) we need to work on row 6 in page 0. div 2, round up
     // and for (17, 36) we need to work on row 1 in page 6. sub 32, end up with 4 (y=3), div 2, do not round
-    
+
     // (17, 13)                          0            13 -  1       >> 1  - 0       ( == 6)
     // (17, 36)                          6            36 -  32      >> 1  - 1       ( == 1)
     // (17, 62)                          7            62 -  48      >> 1  - 1       ( == 6)
@@ -213,9 +227,9 @@ void dispDrawPixel(uint8_t col, uint8_t row)
     // now that we have the row we just need to figure out the Y in the column where the pixel will go
     // every column consists of 8 bytes, so for example a pixel in column 7 should go into byte 0, bit 6
     // another example, column 18 is byte 2, bit 1
-    // first we have to rsh3 the column number to get the correct offset in the row, then set the bit for the correct number
-    // to find the correct bit we modulo by 8, minus one
-    // (17, 13) would need to end up in byte 2, bit 1 TODO: verify endianness
+    // first we have to rsh3 the column number to get the correct offset in the row, then set the bit for the correct
+    // number to find the correct bit we modulo by 8, minus one (17, 13) would need to end up in byte 2, bit 1 TODO:
+    // verify endianness
 
     //                2        |=  7F (01111111)
     *(pRow + ((col - 1) >> 3)) |= (1 << ((col % 8) - 1));
@@ -226,15 +240,19 @@ static void dispToggleDMA(bool enable)
     g_displayState.DMAIsEnabled = enable;
 }
 
-static void dispWriteCommand(uint8_t cmd)
+static void dispWriteCommand(SDisplayCommand_t cmd)
 {
-    uint8_t buf[] = { 0x00, cmd };
-    spiSendCommand(buf, 2);
+    uint8_t buf[3] = { 0x00, cmd.command };
+    if (cmd.hasParameter)
+    {
+        buf[2] = cmd.parameter;
+    }
+    spiSendCommand(buf, (cmd.hasParameter ? 3 : 2));
 }
 
 static void dispResetPointers(void)
 {
-    uint8_t buf[] = { 0x00, SSD1309_COLUMN_ADDR, 0x00, 0x7F };
+    uint8_t buf[]  = { 0x00, SSD1309_COLUMN_ADDR, 0x00, 0x7F };
     uint8_t buf2[] = { 0x00, SSD1309_PAGE_ADDR, 0x00, 0x07 };
 
     spiSendCommand(buf, 4);
@@ -243,15 +261,15 @@ static void dispResetPointers(void)
 
 /**
  * @brief yeet the framebuffer to the display using DMA
- * 
+ *
  */
 static void dispSyncFramebuffer(void)
 {
     if (!g_displayState.DMAIsEnabled) return;
 
     g_displayState.DMAInProgress = true;
-    g_i2cTransfer.pBuffer = g_framebuffer.buffer;
-    g_i2cTransfer.len = 1024;
+    g_i2cTransfer.pBuffer        = g_framebuffer.buffer;
+    g_i2cTransfer.len            = 1024;
 
     i2cTransferDisplayDMA(&g_i2cTransfer);
 }

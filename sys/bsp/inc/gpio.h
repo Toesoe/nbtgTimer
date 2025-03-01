@@ -55,7 +55,8 @@ typedef struct
     SGPIOPin_t   sckPin;
     SGPIOPin_t   misoPin;
     SGPIOPin_t   mosiPin;
-    SGPIOPin_t   dcPin; // for display in SPI mode, the D/C pin is used to distinguish commands and data
+    SGPIOPin_t   dcPin;  // for display in SPI mode, the D/C pin is used to distinguish commands and data
+    SGPIOPin_t   rstPin; // for display in SPI mode, we use a separate reset pin
     uint32_t     pinAFMode;
 } SSPIPinDef_t;
 
@@ -123,6 +124,7 @@ void initGPIO_generic(STimerGenericPinDef_t *);
 void toggleEepromWP(bool);
 void toggleOptocoupler(bool);
 void toggleDisplayDataCommand(bool);
+void resetDisplay(bool);
 
 #ifdef __cplusplus
 }
