@@ -37,11 +37,15 @@ set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_C_COMPILER_WORKS TRUE) # prevent errors on initial test compile
 set(CMAKE_CXX_COMPILER_WORKS TRUE)
 
-set(CMAKE_C_COMPILER        ${TOOLCHAIN_PATH}/arm-none-eabi-gcc${TOOL_SUFFIX} CACHE PATH "" FORCE)
-set(CMAKE_CXX_COMPILER      ${TOOLCHAIN_PATH}/arm-none-eabi-g++${TOOL_SUFFIX} CACHE PATH "" FORCE)
-set(CMAKE_ASM_COMPILER      ${TOOLCHAIN_PATH}/arm-none-eabi-gcc${TOOL_SUFFIX} CACHE PATH "" FORCE)
-set(CMAKE_SIZE_UTIL         ${TOOLCHAIN_PATH}/arm-none-eabi-size${TOOL_SUFFIX})
-set(CMAKE_OBJCOPY           ${TOOLCHAIN_PATH}/arm-none-eabi-objcopy${TOOL_SUFFIX})
+set(CMAKE_C_COMPILER            ${TOOLCHAIN_PATH}/arm-none-eabi-gcc${TOOL_SUFFIX})
+set(CMAKE_CXX_COMPILER          ${TOOLCHAIN_PATH}/arm-none-eabi-g++${TOOL_SUFFIX})
+set(CMAKE_C_COMPILER_LINKER     ${CMAKE_C_COMPILER})
+set(CMAKE_CXX_COMPILER_LINKER   ${CMAKE_CXX_COMPILER})
+set(CMAKE_AR                    ${TOOLCHAIN_PATH}/arm-none-eabi-ar${TOOL_SUFFIX})
+set(CMAKE_RANLIB                ${TOOLCHAIN_PATH}/arm-none-eabi-ranlib${TOOL_SUFFIX})
+set(CMAKE_ASM_COMPILER          ${TOOLCHAIN_PATH}/arm-none-eabi-gcc${TOOL_SUFFIX})
+set(CMAKE_SIZE_UTIL             ${TOOLCHAIN_PATH}/arm-none-eabi-size${TOOL_SUFFIX})
+set(CMAKE_OBJCOPY               ${TOOLCHAIN_PATH}/arm-none-eabi-objcopy${TOOL_SUFFIX})
 
 set(COMMON_FLAGS      "-mcpu=${TARGET_CPU} -mthumb -fmax-errors=5 -msoft-float -mfloat-abi=soft -MD")
 set(WARN_FLAGS        "-Wall -Wextra -Wpointer-arith -Wformat -Wno-unused-local-typedefs -Wno-unused-parameter -Wfloat-equal \
@@ -66,7 +70,7 @@ set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_LIBRARIES ON)
 set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_OBJECTS   ON)
 set(CMAKE_NINJA_FORCE_RESPONSE_FILE           ON)
 
-option(BUILD_DOC   "Build documentation" ON)
+option(BUILD_DOC   "Build documentation" OFF)
 option(BUILD_TESTS "Build test programs" OFF)
 
 set(DISABLE_LIB_TESTS ON)

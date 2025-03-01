@@ -125,6 +125,7 @@ void toggleEepromWP(bool);
 void toggleOptocoupler(bool);
 void toggleDisplayDataCommand(bool);
 void resetDisplay(bool);
+void selectDisplay(bool);
 
 #ifdef __cplusplus
 }

@@ -32,7 +32,6 @@
 // Function prototypes
 //=====================================================================================================================
 
-
 //=====================================================================================================================
 // External functions
 //=====================================================================================================================
@@ -57,6 +56,18 @@ void initTimer(STimerDef_t const *pTimerDef)
     LL_TIM_EnableCounter(pTimerDef->pHWTimer);
 }
 
+
+/**
+ * @brief get value of counter register on specific timer
+ * @param pTimer timer to check
+ * 
+ * @return uint32_t value
+ */
+uint32_t timerGetValue(STimerDef_t const *pTimer)
+{
+    return pTimer->pHWTimer->CNT;
+}
+
 /**
  * @brief blocking delay timer
  * 
@@ -68,18 +79,6 @@ void timerDelay(STimerDef_t const *pTimer, const uint32_t delay)
     uint32_t start = pTimer->pHWTimer->CNT;
 
     while ((pTimer->pHWTimer->CNT - start) < delay);
-}
-
-
-/**
- * @brief get value of counter register on specific timer
- * @param pTimer timer to check
- * 
- * @return uint32_t value
- */
-uint32_t timerGetValue(STimerDef_t const *pTimer)
-{
-    return pTimer->pHWTimer->CNT;
 }
 
 /**

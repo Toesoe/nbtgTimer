@@ -23,6 +23,7 @@ add_library(stm32g0xx_ll
 
 target_include_directories(stm32g0xx_ll PUBLIC
     Inc
+    ../stm32g0xx_sys/CMSIS/Device
 )
 
 # don't enforce warnings on external libraries

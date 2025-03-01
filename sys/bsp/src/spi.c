@@ -39,6 +39,8 @@
 static SPI_TypeDef *g_pSPIPeripheral = NULL;
 static spiStatusCallback g_fnSpiDMACallback = NULL;
 
+static SSPITransfer_t *g_pCurrentTransfer = NULL;
+
 //=====================================================================================================================
 // Function prototypes
 //=====================================================================================================================
@@ -126,30 +128,82 @@ void spiReadData(uint8_t *pData, size_t count)
 
 void spiSendCommand(const uint8_t *pData, size_t count)
 {
+    selectDisplay(true);
     toggleDisplayDataCommand(true);
     spiWriteData(pData, count);
     toggleDisplayDataCommand(false);
+    selectDisplay(false);
 }
 
 void spiInitDisplayDMA(spiStatusCallback dmaStatusCb)
 {
     LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_DMA1);
-    LL_DMA_SetPeriphRequest(DMA1, LL_DMA_CHANNEL_1, LL_DMAMUX_REQ_SPI2_TX);
-    LL_DMA_SetDataTransferDirection(DMA1, LL_DMA_CHANNEL_1, LL_DMA_DIRECTION_MEMORY_TO_PERIPH);
-    LL_DMA_SetChannelPriorityLevel(DMA1, LL_DMA_CHANNEL_1, LL_DMA_PRIORITY_LOW);
-    LL_DMA_SetMode(DMA1, LL_DMA_CHANNEL_1, LL_DMA_MODE_NORMAL);
-    LL_DMA_SetPeriphIncMode(DMA1, LL_DMA_CHANNEL_1, LL_DMA_PERIPH_NOINCREMENT);
-    LL_DMA_SetMemoryIncMode(DMA1, LL_DMA_CHANNEL_1, LL_DMA_MEMORY_INCREMENT);
-    LL_DMA_SetPeriphSize(DMA1, LL_DMA_CHANNEL_1, LL_DMA_PDATAALIGN_BYTE);
-    LL_DMA_SetMemorySize(DMA1, LL_DMA_CHANNEL_1, LL_DMA_MDATAALIGN_BYTE);
+    LL_DMA_SetPeriphRequest(DMA1, LL_DMA_CHANNEL_2, LL_DMAMUX_REQ_SPI2_TX);
+    LL_DMA_SetDataTransferDirection(DMA1, LL_DMA_CHANNEL_2, LL_DMA_DIRECTION_MEMORY_TO_PERIPH);
+    LL_DMA_SetChannelPriorityLevel(DMA1, LL_DMA_CHANNEL_2, LL_DMA_PRIORITY_LOW);
+    LL_DMA_SetMode(DMA1, LL_DMA_CHANNEL_2, LL_DMA_MODE_NORMAL);
+    LL_DMA_SetPeriphIncMode(DMA1, LL_DMA_CHANNEL_2, LL_DMA_PERIPH_NOINCREMENT);
+    LL_DMA_SetMemoryIncMode(DMA1, LL_DMA_CHANNEL_2, LL_DMA_MEMORY_INCREMENT);
+    LL_DMA_SetPeriphSize(DMA1, LL_DMA_CHANNEL_2, LL_DMA_PDATAALIGN_BYTE);
+    LL_DMA_SetMemorySize(DMA1, LL_DMA_CHANNEL_2, LL_DMA_MDATAALIGN_BYTE);
 
-    LL_DMA_EnableIT_TC(DMA1, LL_DMA_CHANNEL_1);
-    LL_DMA_EnableIT_TE(DMA1, LL_DMA_CHANNEL_1);
+    LL_DMA_EnableIT_TC(DMA1, LL_DMA_CHANNEL_2);
+    LL_DMA_EnableIT_TE(DMA1, LL_DMA_CHANNEL_2);
 
-    NVIC_SetPriority(DMA1_Channel1_IRQn, 0);
-    NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+    NVIC_SetPriority(DMA1_Channel2_3_IRQn, 0);
+    NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
 
     g_fnSpiDMACallback = dmaStatusCb;
+}
+
+void spiTransferBlockDMA(SSPITransfer_t *pDMATransferCtx)
+{
+    g_pCurrentTransfer = pDMATransferCtx;
+    g_pCurrentTransfer->transferred = 0;
+
+    // LL_I2C_DisableIT_TX(I2C2);
+    // LL_I2C_DisableIT_RX(I2C2);
+    // LL_I2C_DisableIT_NACK(I2C2);
+    // LL_I2C_DisableIT_ERR(I2C2);
+    // LL_I2C_DisableIT_STOP(I2C2);
+    // LL_I2C_DisableIT_TC(I2C2);
+
+    LL_DMA_ConfigAddresses(DMA1, LL_DMA_CHANNEL_2,
+      (uint32_t)g_pCurrentTransfer->pBuffer,
+      (uint32_t)LL_SPI_DMA_GetRegAddr(g_pSPIPeripheral),
+      LL_DMA_GetDataTransferDirection(DMA1, LL_DMA_CHANNEL_2)
+    );
+
+    LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_2, g_pCurrentTransfer->len);
+    LL_SPI_EnableDMAReq_TX(g_pSPIPeripheral);
+    LL_SPI_Enable(g_pSPIPeripheral);
+    selectDisplay(true);
+    LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_2);
+
+    // use SPI TX complete int to raise CS
+}
+
+__attribute__((interrupt)) void SPI1_IRQHandler(void)
+{
+
+}
+
+__attribute__((interrupt)) void DMA1_Channel2_3_IRQHandler(void)
+{
+    if (LL_DMA_IsActiveFlag_TC2(DMA1))
+    {
+        LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_2);
+        LL_DMA_ClearFlag_TC1(DMA1);
+        selectDisplay(false);
+        LL_SPI_Disable(g_pSPIPeripheral);
+        if (g_fnSpiDMACallback != NULL) g_fnSpiDMACallback(true);
+    }
+    else if (LL_DMA_IsActiveFlag_TE1(DMA1))
+    {
+        LL_DMA_ClearFlag_TE1(DMA1);
+        LL_SPI_Disable(g_pSPIPeripheral);
+        if (g_fnSpiDMACallback != NULL) g_fnSpiDMACallback(false);
+    }
 }
 
 

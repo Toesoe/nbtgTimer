@@ -111,6 +111,14 @@ void resetDisplay(bool assertLine)
                                      g_pCurrentPeriphPinDefs->pSpiDisplayDef->rstPin.pin);
 }
 
+void selectDisplay(bool select)
+{
+    select ? LL_GPIO_ResetOutputPin(g_pCurrentPeriphPinDefs->pSpiDisplayDef->csPin.port,
+                                       g_pCurrentPeriphPinDefs->pSpiDisplayDef->csPin.pin) :
+                LL_GPIO_SetOutputPin(g_pCurrentPeriphPinDefs->pSpiDisplayDef->csPin.port,
+                                     g_pCurrentPeriphPinDefs->pSpiDisplayDef->csPin.pin);
+}
+
 //=====================================================================================================================
 // Statics
 //=====================================================================================================================

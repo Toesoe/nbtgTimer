@@ -13,6 +13,6 @@ target_include_directories(bsp PUBLIC
 
 target_link_libraries(bsp PUBLIC
     stm32g0xx_ll
-    stm32g0xx_sys
+    #stm32g0xx_sys
     freertos_kernel
 )

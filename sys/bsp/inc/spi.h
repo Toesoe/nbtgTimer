@@ -28,6 +28,13 @@
  
  typedef void (*spiStatusCallback)(bool);
 
+ typedef struct
+{
+    uint8_t *pBuffer;
+    size_t len;
+    size_t transferred;
+} SSPITransfer_t;
+
  //=====================================================================================================================
  // Defines
  //=====================================================================================================================
@@ -43,6 +50,7 @@
  void spiSendCommand(const uint8_t *, size_t);
 
  void spiInitDisplayDMA(spiStatusCallback);
+ void spiTransferBlockDMA(SSPITransfer_t *);
  
  #ifdef __cplusplus
  }

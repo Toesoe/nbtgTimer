@@ -68,6 +68,7 @@ typedef struct
 
 static UFrameBuffer_t    g_framebuffer      = { 0 };
 static SI2CTransfer_t    g_i2cTransfer      = { .address = SSD1309_I2C_ADDR };
+static SSPITransfer_t    g_spiTransfer      = { 0 };
 
 static SDisplayControl_t g_displayState     = { 0 };
 
@@ -159,9 +160,9 @@ void initDisplay(EDisplayMode_t displayMode)
         // SPI stuff
         spiInitDisplayDMA(dispDMACallback);
         resetDisplay(true);
-        timerDelay(TIM14, 5); // 500ms delay
+        hwDelayMs(50);
         resetDisplay(false);
-        timerDelay(TIM14, 5); // 500ms delay TODO: make actual delay timer function
+        hwDelayMs(50);
     }
 
     for (size_t i = 0; i < sizeof(SSD1309_INIT_SEQ) / sizeof(SSD1309_INIT_SEQ[0]); i++)
@@ -183,9 +184,6 @@ void initDisplay(EDisplayMode_t displayMode)
 
     while (g_displayState.DMAInProgress)
     {}
-
-    while (true)
-        ;
 }
 
 /**
@@ -268,10 +266,19 @@ static void dispSyncFramebuffer(void)
     if (!g_displayState.DMAIsEnabled) return;
 
     g_displayState.DMAInProgress = true;
-    g_i2cTransfer.pBuffer        = g_framebuffer.buffer;
-    g_i2cTransfer.len            = 1024;
 
-    i2cTransferDisplayDMA(&g_i2cTransfer);
+    if (g_displayState.mode == MODE_I2C)
+    {
+        g_i2cTransfer.pBuffer        = g_framebuffer.buffer;
+        g_i2cTransfer.len            = 1024;
+        i2cTransferDisplayDMA(&g_i2cTransfer);
+    }
+    else
+    {
+        g_spiTransfer.pBuffer = g_framebuffer.buffer;
+        g_spiTransfer.len = 1024;
+        spiTransferBlockDMA(&g_spiTransfer);
+    }
 }
 
 static void dispWriteFbuf(void)
