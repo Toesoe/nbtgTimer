@@ -3,6 +3,8 @@
  *
  * @brief display routines for nbtgTimer
  * SSD1309 using DMA/I2C
+ * 
+ * using horizontal addressing and DMA we'll have a hell of a refresh rate
  */
 
 //=====================================================================================================================
@@ -39,13 +41,13 @@ typedef union
 {
     uint8_t page[SSD1309_PAGE_SIZE_BYTES];
     uint8_t rows[8][SSD1309_ROW_SIZE_BYTES];
-} UPageRow_t;
+} __attribute__((packed)) UPageRow_t;
 
 typedef union
 {
     uint8_t    buffer[SSD1309_GDDRAM_SIZE_BYTES];
     UPageRow_t pages[8];
-} UFrameBuffer_t;
+} __attribute__((packed)) UFrameBuffer_t;
 
 typedef struct
 {
@@ -66,27 +68,27 @@ typedef struct
 // Globals
 //=====================================================================================================================
 
-static UFrameBuffer_t    g_framebuffer      = { 0 };
-static SI2CTransfer_t    g_i2cTransfer      = { .address = SSD1309_I2C_ADDR };
-static SSPITransfer_t    g_spiTransfer      = { 0 };
+static __attribute__((aligned(4))) UFrameBuffer_t g_framebuffer      = { 0 };
+static SI2CTransfer_t                             g_i2cTransfer      = { .address = SSD1309_I2C_ADDR };
+static SSPITransfer_t                             g_spiTransfer      = { 0 };
 
-static SDisplayControl_t g_displayState     = { 0 };
+static SDisplayControl_t                          g_displayState     = { 0 };
 
 SDisplayCommand_t        SSD1309_INIT_SEQ[] = {
     (SDisplayCommand_t){ SSD1309_DISPLAY_OFF,                            0x00, false },
 
-    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_CLOCK_DIV,                  0xA0,
-                        true                                                         }, // clock divide ratio (0x00=1) and oscillator frequency (0x8)
+    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_CLOCK_DIV,                  0x80, true  }, // clock divide ratio (0x00=1) and oscillator frequency (0x8)
+    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_OFFSET,                     0x00, true  },
     (SDisplayCommand_t){ SSD1309_SET_START_LINE,                         0x00, false },
+    (SDisplayCommand_t){ SSD1309_CHARGE_PUMP,                            0x14, true  },
     (SDisplayCommand_t){ SSD1309_MEMORY_MODE,                            0x00, true  },
     (SDisplayCommand_t){ SSD1309_SEG_REMAP_FLIP,                         0x00, false },
     (SDisplayCommand_t){ SSD1309_COM_SCAN_DEC,                           0x00, false },
-    (SDisplayCommand_t){ SSD1309_SET_COM_PINS,                           0x12,
-                        true                                                         }, // alternative com pin config (bit 4), disable left/right remap (bit 5) -> datasheet
+    (SDisplayCommand_t){ SSD1309_SET_COM_PINS,                           0x12, true  }, // alternative com pin config (bit 4), disable left/right remap (bit 5) -> datasheet
     // option 5 with COM_SCAN_INC, 8 with COM_SCAN_DEC
     (SDisplayCommand_t){ SSD1309_SET_CONTRAST,                           0x6F, true  },
-    (SDisplayCommand_t){ SSD1309_SET_PRECHARGE,                          0xD3, true  }, // precharge period 0x22/F1
-    (SDisplayCommand_t){ SSD1309_SET_VCOM_DESELECT,                      0x20, true  }, // vcomh deselect level
+    (SDisplayCommand_t){ SSD1309_SET_PRECHARGE,                          0x22, true  }, // precharge period 0x22/F1
+    (SDisplayCommand_t){ SSD1309_SET_VCOM_DESELECT,                      0x40, true  }, // vcomh deselect level
 
     (SDisplayCommand_t){ SSD1309_DEACTIVATE_SCROLL,                      0x00, false },
     (SDisplayCommand_t){ SSD1309_DISPLAY_ALL_ON_RESUME,                  0x00, false }, // normal mode: ram -> display
@@ -160,30 +162,15 @@ void initDisplay(EDisplayMode_t displayMode)
         // SPI stuff
         spiInitDisplayDMA(dispDMACallback);
         resetDisplay(true);
-        hwDelayMs(50);
+        hwDelayMs(10);
         resetDisplay(false);
-        hwDelayMs(50);
+        hwDelayMs(500);
     }
 
     for (size_t i = 0; i < sizeof(SSD1309_INIT_SEQ) / sizeof(SSD1309_INIT_SEQ[0]); i++)
     {
         dispWriteCommand(SSD1309_INIT_SEQ[i]);
     }
-
-    for (size_t i = 0; i < SSD1309_HEIGHT; i += 4)
-    {
-        for (size_t j = 0; j < SSD1309_WIDTH; j += 4)
-        {
-            dispDrawPixel(j, i);
-        }
-    }
-
-    dispToggleDMA(true);
-
-    dispSyncFramebuffer();
-
-    while (g_displayState.DMAInProgress)
-    {}
 }
 
 /**
@@ -196,41 +183,32 @@ void initDisplay(EDisplayMode_t displayMode)
  */
 void dispDrawPixel(uint8_t col, uint8_t row)
 {
-    // rsh4 gives us the correct page from 0-3
-    size_t page   = row >> 4;
-    size_t offset = (page << 4) + 1; // either 0, 16, 32, 48: sub this from (row >> 1)
-    size_t uneven = 0;
+    // 0-based indexing
+    col--;
+    row--;
 
-    // coordinates start at 1, but calculation at 0
-    if (((row - 1) % 2) == 0)
+    // determine which page contains this row
+    uint8_t page, bitPosition;
+
+    if (row % 2 == 0)
     {
-        // when uneven, start at page 4.
-        page += 4;
-        uneven = 1;
-        offset -= 1; // don't sub the offset for uneven numbers
+        // even rows (0,2,4,...) - go to pages 0-3
+        page = row / 16;
+        // for even rows, calculate bit position within the byte
+        // row 0 → bit 0, row 2 → bit 1, row 4 → bit 2, etc.
+        bitPosition = (row % 16) / 2;
+    }
+    else
+    {
+        // odd rows (1,3,5,...) - go to pages 4-7
+        page = 4 + (row / 16);
+        // For odd rows, calculate bit position within the byte
+        // row 1 → bit 0, row 3 → bit 1, row 5 → bit 2, etc.
+        bitPosition = (row % 16) / 2;
     }
 
-    // if we multiply this rsh value by 16 we get the offset (0, 16, 32, 48)
-    // if we subtract this from the original y position and rsh by 1 we get the right row to work on
-    // for example, for (17, 13) we need to work on row 6 in page 0. div 2, round up
-    // and for (17, 36) we need to work on row 1 in page 6. sub 32, end up with 4 (y=3), div 2, do not round
-
-    // (17, 13)                          0            13 -  1       >> 1  - 0       ( == 6)
-    // (17, 36)                          6            36 -  32      >> 1  - 1       ( == 1)
-    // (17, 62)                          7            62 -  48      >> 1  - 1       ( == 6)
-    // (17, 63)                          3            63 -  49      >> 1  - 0       ( == 7)
-    // (17, 64)                          7            64 -  48      >> 1  - 1       ( == 7)
-    uint8_t *pRow = g_framebuffer.pages[page].rows[((row - offset) >> 1) - uneven];
-
-    // now that we have the row we just need to figure out the Y in the column where the pixel will go
-    // every column consists of 8 bytes, so for example a pixel in column 7 should go into byte 0, bit 6
-    // another example, column 18 is byte 2, bit 1
-    // first we have to rsh3 the column number to get the correct offset in the row, then set the bit for the correct
-    // number to find the correct bit we modulo by 8, minus one (17, 13) would need to end up in byte 2, bit 1 TODO:
-    // verify endianness
-
-    //                2        |=  7F (01111111)
-    *(pRow + ((col - 1) >> 3)) |= (1 << ((col % 8) - 1));
+    // in horizontal addressing mode, each byte represents a single column so the byteOffset is simply the column number
+    g_framebuffer.pages[page].page[col] |= (1 << bitPosition);
 }
 
 static void dispToggleDMA(bool enable)
