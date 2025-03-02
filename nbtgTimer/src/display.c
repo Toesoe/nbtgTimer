@@ -3,7 +3,7 @@
  *
  * @brief display routines for nbtgTimer
  *
- * using horizontal addressing and DMA we'll have a hell of a refresh rate
+ * using horizontal addressing and DMA we get about 60fps at 8MHz
  */
 
 //=====================================================================================================================
@@ -258,7 +258,7 @@ void dispDrawLine(SLine_t line)
         // DEBUG: Print coordinates for tracing
         //printf("Drawing at: (%d, %d)\n", x0 + 1, y0 + 1); 
 
-        dispDrawPixel((SPoint_t) { x0 + 1, y0 + 1 });
+        dispDrawPixel((SPixel_t){ { x0 + 1, y0 + 1 }, COLOR_WHITE });
 
         if (x0 == x1 && y0 == y1) 
             break;
