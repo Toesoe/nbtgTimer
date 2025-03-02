@@ -46,6 +46,7 @@ extern "C"
 #define SSD1309_INVERT_DISPLAY                       0xA7
 
 #define SSD1309_SET_MULTIPLEX                        0xA8
+#define SSD1309_SET_MASTER_CONFIG                    0xAD
 
 #define SSD1309_DISPLAY_OFF                          0xAE
 #define SSD1309_DISPLAY_ON                           0xAF
@@ -75,12 +76,38 @@ typedef enum
     MODE_SPI
 } EDisplayMode_t;
 
+typedef enum
+{
+    COLOR_BLACK,
+    COLOR_WHITE
+} EPixelColor_t;
+
+typedef struct
+{
+    uint8_t x;
+    uint8_t y;
+} SPoint_t;
+
+typedef struct
+{
+    SPoint_t coordinates;
+    EPixelColor_t color;
+} SPixel_t;
+
+typedef struct
+{
+    SPoint_t start;
+    SPoint_t end;
+    EPixelColor_t color;
+} SLine_t;
+
 //=====================================================================================================================
 // Functions
 //=====================================================================================================================
 
 void initDisplay(EDisplayMode_t);
-void dispDrawPixel(uint8_t, uint8_t);
+void dispDrawPixel(SPixel_t);
+void dispDrawLine(SLine_t);
 
 #ifdef __cplusplus
 }

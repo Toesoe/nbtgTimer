@@ -2,8 +2,7 @@
  * @file display.c
  *
  * @brief display routines for nbtgTimer
- * SSD1309 using DMA/I2C
- * 
+ *
  * using horizontal addressing and DMA we'll have a hell of a refresh rate
  */
 
@@ -19,7 +18,6 @@
 #include "board.h"
 #include "images.h"
 
-
 //=====================================================================================================================
 // Defines
 //=====================================================================================================================
@@ -30,6 +28,7 @@
 #define SSD1309_PAGE_SIZE_BYTES   128
 #define SSD1309_ROW_SIZE_BYTES    16
 #define SSD1309_GDDRAM_SIZE_BYTES 1024
+#define SSD1309_NUM_PAGES         8
 
 #define SSD1309_I2C_ADDR          0x78
 
@@ -51,44 +50,53 @@ typedef union
 
 typedef struct
 {
-    EDisplayMode_t mode;
-    bool           DMAIsEnabled;
-    bool           DMAInProgress;
-    bool           nonDMAInProgress;
-} SDisplayControl_t;
-
-typedef struct
-{
     uint8_t command;
     uint8_t parameter;
     bool    hasParameter;
 } SDisplayCommand_t;
 
+typedef struct
+{
+    uint8_t  address; // not used for SPI but used for bitcompat with SI2CTransfer_t
+    uint8_t *pBuffer;
+    size_t   len;
+    size_t   transferred;
+} SDMATranferContext_t;
+
+typedef struct
+{
+    EDisplayMode_t                             mode;
+    bool                                       DMAIsEnabled;
+    bool                                       DMAInProgress;
+    bool                                       nonDMAInProgress;
+
+    __attribute__((aligned(4))) UFrameBuffer_t framebuffer;
+    SDMATranferContext_t                       dmaTransferContext;
+} SDisplayContext_t;
+
 //=====================================================================================================================
 // Globals
 //=====================================================================================================================
 
-static __attribute__((aligned(4))) UFrameBuffer_t g_framebuffer      = { 0 };
-static SI2CTransfer_t                             g_i2cTransfer      = { .address = SSD1309_I2C_ADDR };
-static SSPITransfer_t                             g_spiTransfer      = { 0 };
-
-static SDisplayControl_t                          g_displayState     = { 0 };
+static SDisplayContext_t       g_displayContext   = { 0 };
 
 SDisplayCommand_t        SSD1309_INIT_SEQ[] = {
     (SDisplayCommand_t){ SSD1309_DISPLAY_OFF,                            0x00, false },
 
-    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_CLOCK_DIV,                  0x80, true  }, // clock divide ratio (0x00=1) and oscillator frequency (0x8)
+    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_CLOCK_DIV,                  0xA0, true  }, // clock divide ratio (0x00=1) and oscillator frequency (0x8)
+    (SDisplayCommand_t){ SSD1309_SET_MULTIPLEX,                          0x3F, true  },
     (SDisplayCommand_t){ SSD1309_SET_DISPLAY_OFFSET,                     0x00, true  },
     (SDisplayCommand_t){ SSD1309_SET_START_LINE,                         0x00, false },
-    (SDisplayCommand_t){ SSD1309_CHARGE_PUMP,                            0x14, true  },
+    (SDisplayCommand_t){ SSD1309_SET_MASTER_CONFIG,                      0x8E, true  },
+    //(SDisplayCommand_t){ SSD1309_CHARGE_PUMP,                            0x14, true  },
     (SDisplayCommand_t){ SSD1309_MEMORY_MODE,                            0x00, true  },
     (SDisplayCommand_t){ SSD1309_SEG_REMAP_FLIP,                         0x00, false },
     (SDisplayCommand_t){ SSD1309_COM_SCAN_DEC,                           0x00, false },
     (SDisplayCommand_t){ SSD1309_SET_COM_PINS,                           0x12, true  }, // alternative com pin config (bit 4), disable left/right remap (bit 5) -> datasheet
     // option 5 with COM_SCAN_INC, 8 with COM_SCAN_DEC
     (SDisplayCommand_t){ SSD1309_SET_CONTRAST,                           0x6F, true  },
-    (SDisplayCommand_t){ SSD1309_SET_PRECHARGE,                          0x22, true  }, // precharge period 0x22/F1
-    (SDisplayCommand_t){ SSD1309_SET_VCOM_DESELECT,                      0x40, true  }, // vcomh deselect level
+    (SDisplayCommand_t){ SSD1309_SET_PRECHARGE,                          0xF1, true  }, // precharge period 0x22/F1
+    (SDisplayCommand_t){ SSD1309_SET_VCOM_DESELECT,                      0x30, true  }, // vcomh deselect level
 
     (SDisplayCommand_t){ SSD1309_DEACTIVATE_SCROLL,                      0x00, false },
     (SDisplayCommand_t){ SSD1309_DISPLAY_ALL_ON_RESUME,                  0x00, false }, // normal mode: ram -> display
@@ -98,16 +106,14 @@ SDisplayCommand_t        SSD1309_INIT_SEQ[] = {
     (SDisplayCommand_t){ SSD1309_COLUMN_START_ADDRESS_LOW_NIBBLE | 0x00, 0x00, false },
     (SDisplayCommand_t){ SSD1309_COLUMN_START_ADDRESS_HI_NIBBLE | 0x00,  0x00, false },
     (SDisplayCommand_t){ SSD1309_SET_PAGE_START_ADDRESS | 0x00,          0x00, false },
-
-    (SDisplayCommand_t){ SSD1309_DISPLAY_ON,                             0x00, false },
 };
 
-SDisplayCommand_t SSD1309_FLIP0_SEQ[] = {
+static const SDisplayCommand_t SSD1309_FLIP0_SEQ[] = {
     (SDisplayCommand_t){ SSD1309_SEG_REMAP_FLIP, 0x00, false },
     (SDisplayCommand_t){ SSD1309_COM_SCAN_DEC,   0x00, false },
 };
 
-SDisplayCommand_t SSD1309_FLIP1_SEQ[] = {
+static const SDisplayCommand_t SSD1309_FLIP1_SEQ[] = {
     (SDisplayCommand_t){ SSD1309_SEG_REMAP_NORMAL, 0x00, false },
     (SDisplayCommand_t){ SSD1309_COM_SCAN_INC,     0x00, false },
 };
@@ -131,15 +137,13 @@ SDisplayCommand_t SSD1309_FLIP1_SEQ[] = {
 // Static protos
 //=====================================================================================================================
 
-static void dispToggleDMA(bool);
-
 static void dispWriteCommand(SDisplayCommand_t);
-static void dispWriteFbuf(void);
 static void dispSyncFramebuffer(void);
 
-static void dispWriteMulti(uint8_t *, size_t);
 static void dispDMACallback(bool);
 static void dispRegularCallback(bool);
+
+static void testPage(uint8_t);
 
 //=====================================================================================================================
 // Functions
@@ -147,10 +151,18 @@ static void dispRegularCallback(bool);
 
 void initDisplay(EDisplayMode_t displayMode)
 {
-    g_displayState.mode             = displayMode;
-    g_displayState.DMAInProgress    = false;
-    g_displayState.DMAIsEnabled     = false;
-    g_displayState.nonDMAInProgress = false;
+    g_displayContext.mode             = displayMode;
+    g_displayContext.DMAInProgress    = false;
+    g_displayContext.DMAIsEnabled     = false;
+    g_displayContext.nonDMAInProgress = false;
+
+    memset(g_displayContext.framebuffer.buffer, 0, 1024);
+    memset(&g_displayContext.dmaTransferContext, 0, sizeof(SDMATranferContext_t));
+
+    g_displayContext.dmaTransferContext.address = SSD1309_I2C_ADDR;
+    g_displayContext.dmaTransferContext.pBuffer = g_displayContext.framebuffer.buffer;
+    g_displayContext.dmaTransferContext.len     = SSD1309_GDDRAM_SIZE_BYTES;
+    g_displayContext.dmaTransferContext.transferred = 0;
 
     if (displayMode == MODE_I2C)
     {
@@ -171,6 +183,17 @@ void initDisplay(EDisplayMode_t displayMode)
     {
         dispWriteCommand(SSD1309_INIT_SEQ[i]);
     }
+
+    uint8_t buf[5] = { 0x91, 0x3F, 0x3F, 0x3F, 0x3F };
+    spiSendCommand(buf, 5);
+
+    dispWriteCommand((SDisplayCommand_t){ SSD1309_DISPLAY_ON, 0x00, false });
+    hwDelayMs(100);
+    g_displayContext.DMAIsEnabled = true;
+
+    dispSyncFramebuffer(); // zero out GDDRAM
+
+    while (g_displayContext.DMAInProgress) {}
 }
 
 /**
@@ -178,52 +201,100 @@ void initDisplay(EDisplayMode_t displayMode)
  *
  * offsets are based on 1,1. calculations are performed inside to ensure page alignment.
  *
- * @param col column to draw in (x)
- * @param row row to draw in (y)
  */
-void dispDrawPixel(uint8_t col, uint8_t row)
+void dispDrawPixel(SPixel_t pixel)
 {
-    // 0-based indexing
-    col--;
-    row--;
+    if ((pixel.coordinates.x < 1 || pixel.coordinates.x > SSD1309_WIDTH) || (pixel.coordinates.y < 1 || pixel.coordinates.y > SSD1309_HEIGHT)) return;
 
-    // determine which page contains this row
-    uint8_t page, bitPosition;
+    // Convert to 0-based coordinates
+    uint8_t x = pixel.coordinates.x - 1;
+    uint8_t y = pixel.coordinates.y - 1;
 
-    if (row % 2 == 0)
+    // Compute the correct page (row-to-page mapping)
+    uint8_t page = y / 8;
+
+    // Compute the correct bit position
+    uint8_t bitPosition = y % 8;
+
+    // Set the pixel in the framebuffer
+    if (pixel.color == COLOR_WHITE)
     {
-        // even rows (0,2,4,...) - go to pages 0-3
-        page = row / 16;
-        // for even rows, calculate bit position within the byte
-        // row 0 → bit 0, row 2 → bit 1, row 4 → bit 2, etc.
-        bitPosition = (row % 16) / 2;
+        g_displayContext.framebuffer.pages[page].page[x] |= (1 << bitPosition);
     }
     else
     {
-        // odd rows (1,3,5,...) - go to pages 4-7
-        page = 4 + (row / 16);
-        // For odd rows, calculate bit position within the byte
-        // row 1 → bit 0, row 3 → bit 1, row 5 → bit 2, etc.
-        bitPosition = (row % 16) / 2;
+        g_displayContext.framebuffer.pages[page].page[x] &= ~(1 << bitPosition);
     }
-
-    // in horizontal addressing mode, each byte represents a single column so the byteOffset is simply the column number
-    g_framebuffer.pages[page].page[col] |= (1 << bitPosition);
 }
 
-static void dispToggleDMA(bool enable)
+/**
+ * @brief draw a line with Bresenham's algo
+ * 
+ * @param line line to draw
+ */
+void dispDrawLine(SLine_t line)
 {
-    g_displayState.DMAIsEnabled = enable;
+    if ((line.start.x < 1 || line.start.x > SSD1309_WIDTH) || 
+        (line.end.x < 1 || line.end.x > SSD1309_WIDTH) ||
+        (line.start.y < 1 || line.start.y > SSD1309_HEIGHT) || 
+        (line.end.y < 1 || line.end.y > SSD1309_HEIGHT))
+    {
+        return;
+    }
+
+    int16_t x0 = line.start.x - 1;  // Adjust for 1-based addressing
+    int16_t y0 = line.start.y - 1;
+    int16_t x1 = line.end.x - 1;
+    int16_t y1 = line.end.y - 1;
+
+    int16_t dx = abs(x1 - x0);
+    int16_t sx = (x0 < x1) ? 1 : -1;
+    int16_t dy = abs(y1 - y0);
+    int16_t sy = (y0 < y1) ? 1 : -1;
+    int16_t err = (dx > dy ? dx : -dy) / 2;
+    int16_t e2;
+
+    while (1) {
+        // DEBUG: Print coordinates for tracing
+        //printf("Drawing at: (%d, %d)\n", x0 + 1, y0 + 1); 
+
+        dispDrawPixel((SPoint_t) { x0 + 1, y0 + 1 });
+
+        if (x0 == x1 && y0 == y1) 
+            break;
+
+        e2 = err;
+        if (e2 > -dx) {
+            err -= dy;
+            x0 += sx;
+        }
+        if (e2 < dy) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+static void testPage(uint8_t page)
+{
+    page = 7 - page;
+
+    memset(g_displayContext.framebuffer.buffer, 0, SSD1309_GDDRAM_SIZE_BYTES);
+    // Fill an entire page with all pixels on
+    for (int i = 0; i < SSD1309_PAGE_SIZE_BYTES; i++)
+    {
+        g_displayContext.framebuffer.pages[page].page[i] = 0xFF;
+    }
 }
 
 static void dispWriteCommand(SDisplayCommand_t cmd)
 {
-    uint8_t buf[3] = { 0x00, cmd.command };
+    uint8_t buf[2] = { cmd.command };
     if (cmd.hasParameter)
     {
-        buf[2] = cmd.parameter;
+        buf[1] = cmd.parameter;
     }
-    spiSendCommand(buf, (cmd.hasParameter ? 3 : 2));
+    spiSendCommand(buf, (cmd.hasParameter ? 2 : 1));
 }
 
 static void dispResetPointers(void)
@@ -241,36 +312,27 @@ static void dispResetPointers(void)
  */
 static void dispSyncFramebuffer(void)
 {
-    if (!g_displayState.DMAIsEnabled) return;
+    if (!g_displayContext.DMAIsEnabled) return;
 
-    g_displayState.DMAInProgress = true;
+    g_displayContext.DMAInProgress                  = true;
+    g_displayContext.dmaTransferContext.transferred = 0;
 
-    if (g_displayState.mode == MODE_I2C)
+    if (g_displayContext.mode == MODE_I2C)
     {
-        g_i2cTransfer.pBuffer        = g_framebuffer.buffer;
-        g_i2cTransfer.len            = 1024;
-        i2cTransferDisplayDMA(&g_i2cTransfer);
+        i2cTransferDisplayDMA((SI2CTransfer_t *)&g_displayContext.dmaTransferContext);
     }
     else
     {
-        g_spiTransfer.pBuffer = g_framebuffer.buffer;
-        g_spiTransfer.len = 1024;
-        spiTransferBlockDMA(&g_spiTransfer);
+        spiTransferBlockDMA((SSPITransfer_t *)&g_displayContext.dmaTransferContext);
     }
-}
-
-static void dispWriteFbuf(void)
-{
-    g_displayState.nonDMAInProgress = true;
-    spiWriteData(g_framebuffer.buffer, 1024);
 }
 
 static void dispDMACallback(bool isComplete)
 {
-    g_displayState.DMAInProgress = false;
+    g_displayContext.DMAInProgress = false;
 }
 
 static void dispRegularCallback(bool isComplete)
 {
-    g_displayState.nonDMAInProgress = false;
+    g_displayContext.nonDMAInProgress = false;
 }

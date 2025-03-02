@@ -193,14 +193,14 @@ __attribute__((interrupt)) void DMA1_Channel2_3_IRQHandler(void)
     if (LL_DMA_IsActiveFlag_TC2(DMA1))
     {
         LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_2);
-        LL_DMA_ClearFlag_TC1(DMA1);
+        LL_DMA_ClearFlag_TC2(DMA1);
         selectDisplay(false);
         LL_SPI_Disable(g_pSPIPeripheral);
         if (g_fnSpiDMACallback != NULL) g_fnSpiDMACallback(true);
     }
-    else if (LL_DMA_IsActiveFlag_TE1(DMA1))
+    else if (LL_DMA_IsActiveFlag_TE2(DMA1))
     {
-        LL_DMA_ClearFlag_TE1(DMA1);
+        LL_DMA_ClearFlag_TE2(DMA1);
         LL_SPI_Disable(g_pSPIPeripheral);
         if (g_fnSpiDMACallback != NULL) g_fnSpiDMACallback(false);
     }
