@@ -106,6 +106,7 @@ typedef struct
 //=====================================================================================================================
 
 void initDisplay(EDisplayMode_t);
+void toggleDisplay(bool);
 void dispDrawPixel(SPixel_t);
 void dispDrawLine(SLine_t);
 

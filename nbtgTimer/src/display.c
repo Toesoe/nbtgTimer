@@ -3,7 +3,7 @@
  *
  * @brief display routines for nbtgTimer
  *
- * using horizontal addressing and DMA we get about 60fps at 8MHz
+ * using horizontal addressing and DMA we get about 60fps at 8MHz: 30 is plenty so we use a hw timer on autoreload
  */
 
 //=====================================================================================================================
@@ -50,6 +50,12 @@ typedef union
 
 typedef struct
 {
+    __attribute__((aligned(4))) UFrameBuffer_t buffer1;
+    __attribute__((aligned(4))) UFrameBuffer_t buffer2;
+} SFrameBuffer_t;
+
+typedef struct
+{
     uint8_t command;
     uint8_t parameter;
     bool    hasParameter;
@@ -65,13 +71,15 @@ typedef struct
 
 typedef struct
 {
+    bool                                       isEnabled;
     EDisplayMode_t                             mode;
+    SDMATranferContext_t                       dmaTransferContext;
     bool                                       DMAIsEnabled;
     bool                                       DMAInProgress;
-    bool                                       nonDMAInProgress;
 
-    __attribute__((aligned(4))) UFrameBuffer_t framebuffer;
-    SDMATranferContext_t                       dmaTransferContext;
+    UFrameBuffer_t                            *pFrontBuffer;
+    UFrameBuffer_t                            *pBackBuffer;
+    
 } SDisplayContext_t;
 
 //=====================================================================================================================
@@ -79,6 +87,10 @@ typedef struct
 //=====================================================================================================================
 
 static SDisplayContext_t       g_displayContext   = { 0 };
+
+SFrameBuffer_t                 g_framebuffers;
+
+SPixel_t                       g_pxl = {(SPoint_t) {1, 1}, COLOR_WHITE};
 
 SDisplayCommand_t        SSD1309_INIT_SEQ[] = {
     (SDisplayCommand_t){ SSD1309_DISPLAY_OFF,                            0x00, false },
@@ -108,7 +120,7 @@ SDisplayCommand_t        SSD1309_INIT_SEQ[] = {
     (SDisplayCommand_t){ SSD1309_SET_PAGE_START_ADDRESS | 0x00,          0x00, false },
 };
 
-static const SDisplayCommand_t SSD1309_FLIP0_SEQ[] = {
+static const SDisplayCommand_t SSD1309_FLIP0_SEQ[] = { // default mode
     (SDisplayCommand_t){ SSD1309_SEG_REMAP_FLIP, 0x00, false },
     (SDisplayCommand_t){ SSD1309_COM_SCAN_DEC,   0x00, false },
 };
@@ -154,25 +166,30 @@ void initDisplay(EDisplayMode_t displayMode)
     g_displayContext.mode             = displayMode;
     g_displayContext.DMAInProgress    = false;
     g_displayContext.DMAIsEnabled     = false;
-    g_displayContext.nonDMAInProgress = false;
+    g_displayContext.isEnabled        = false;
 
-    memset(g_displayContext.framebuffer.buffer, 0, 1024);
+    memset(&g_framebuffers.buffer1.buffer, 0, SSD1309_GDDRAM_SIZE_BYTES);
+    memset(&g_framebuffers.buffer2.buffer, 0, SSD1309_GDDRAM_SIZE_BYTES);
+
+    g_displayContext.pFrontBuffer = &g_framebuffers.buffer1;
+    g_displayContext.pBackBuffer  = &g_framebuffers.buffer2;
+
     memset(&g_displayContext.dmaTransferContext, 0, sizeof(SDMATranferContext_t));
 
     g_displayContext.dmaTransferContext.address = SSD1309_I2C_ADDR;
-    g_displayContext.dmaTransferContext.pBuffer = g_displayContext.framebuffer.buffer;
+    g_displayContext.dmaTransferContext.pBuffer = g_displayContext.pFrontBuffer->buffer;
     g_displayContext.dmaTransferContext.len     = SSD1309_GDDRAM_SIZE_BYTES;
     g_displayContext.dmaTransferContext.transferred = 0;
 
     if (displayMode == MODE_I2C)
     {
-        i2cRegisterCallback(dispRegularCallback);
         i2cInitDisplayDMA(dispDMACallback);
     }
     else
     {
         // SPI stuff
         spiInitDisplayDMA(dispDMACallback);
+        registerDisplayFramerateTimerCallback(dispSyncFramebuffer);
         resetDisplay(true);
         hwDelayMs(10);
         resetDisplay(false);
@@ -194,6 +211,22 @@ void initDisplay(EDisplayMode_t displayMode)
     dispSyncFramebuffer(); // zero out GDDRAM
 
     while (g_displayContext.DMAInProgress) {}
+
+    g_displayContext.isEnabled = true;
+}
+
+void toggleDisplay(bool enable)
+{
+    if (enable)
+    {
+        dispWriteCommand((SDisplayCommand_t){ SSD1309_DISPLAY_ON, 0x00, false });
+        g_displayContext.isEnabled = true;
+    }
+    else
+    {
+        dispWriteCommand((SDisplayCommand_t){ SSD1309_DISPLAY_OFF, 0x00, false });
+        g_displayContext.isEnabled = false;
+    }
 }
 
 /**
@@ -219,11 +252,11 @@ void dispDrawPixel(SPixel_t pixel)
     // Set the pixel in the framebuffer
     if (pixel.color == COLOR_WHITE)
     {
-        g_displayContext.framebuffer.pages[page].page[x] |= (1 << bitPosition);
+        g_displayContext.pBackBuffer->pages[page].page[x] |= (1 << bitPosition);
     }
     else
     {
-        g_displayContext.framebuffer.pages[page].page[x] &= ~(1 << bitPosition);
+        g_displayContext.pBackBuffer->pages[page].page[x] &= ~(1 << bitPosition);
     }
 }
 
@@ -279,11 +312,11 @@ static void testPage(uint8_t page)
 {
     page = 7 - page;
 
-    memset(g_displayContext.framebuffer.buffer, 0, SSD1309_GDDRAM_SIZE_BYTES);
+    memset(g_displayContext.pFrontBuffer->buffer, 0, SSD1309_GDDRAM_SIZE_BYTES);
     // Fill an entire page with all pixels on
     for (int i = 0; i < SSD1309_PAGE_SIZE_BYTES; i++)
     {
-        g_displayContext.framebuffer.pages[page].page[i] = 0xFF;
+        g_displayContext.pFrontBuffer->pages[page].page[i] = 0xFF;
     }
 }
 
@@ -312,10 +345,26 @@ static void dispResetPointers(void)
  */
 static void dispSyncFramebuffer(void)
 {
-    if (!g_displayContext.DMAIsEnabled) return;
+    if (!g_displayContext.isEnabled || !g_displayContext.DMAIsEnabled || g_displayContext.DMAInProgress) return;
 
     g_displayContext.DMAInProgress                  = true;
     g_displayContext.dmaTransferContext.transferred = 0;
+
+    dispDrawPixel(g_pxl);
+
+    g_pxl.coordinates.x++;
+
+    if (g_pxl.coordinates.x == SSD1309_WIDTH + 1)
+    {
+        g_pxl.coordinates.y++;
+        g_pxl.coordinates.x = 1;
+    }
+
+    if (g_pxl.coordinates.y == SSD1309_HEIGHT + 1)
+    {
+        g_pxl.coordinates.x = 0;
+        g_pxl.coordinates.y = 0;
+    }
 
     if (g_displayContext.mode == MODE_I2C)
     {
@@ -329,10 +378,10 @@ static void dispSyncFramebuffer(void)
 
 static void dispDMACallback(bool isComplete)
 {
-    g_displayContext.DMAInProgress = false;
-}
+    // swap buffers
+    UFrameBuffer_t *pTmp = g_displayContext.pFrontBuffer;
+    g_displayContext.pFrontBuffer = g_displayContext.pBackBuffer;
+    g_displayContext.pBackBuffer = pTmp;
 
-static void dispRegularCallback(bool isComplete)
-{
-    g_displayContext.nonDMAInProgress = false;
+    g_displayContext.DMAInProgress = false;
 }

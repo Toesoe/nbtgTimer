@@ -77,7 +77,8 @@ add_library(freertos_kernel_port OBJECT
 
     # ARMv6-M port for GCC
     $<$<STREQUAL:${FREERTOS_PORT},GCC_ARM_CM0>:
-        GCC/ARM_CM0/port.c>
+        GCC/ARM_CM0/port.c
+        GCC/ARM_CM0/portasm.c>
 
     # ARMv6-M / Cortex-M0 Raspberry PI RP2040 port for GCC
     $<$<STREQUAL:${FREERTOS_PORT},GCC_RP2040>:

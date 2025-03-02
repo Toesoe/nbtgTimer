@@ -29,14 +29,14 @@
 // Defines
 //=====================================================================================================================
 
-#define SYS_CLK_FREQ_HZ (64000000)
+#define SYS_CLK_FREQ_HZ (SystemCoreClock)
 
 //=====================================================================================================================
 // Globals
 //=====================================================================================================================
 
-STimerDef_t timer1 = {TIM1, 1000};
-STimerDef_t timer14 = {TIM14, 100};
+STimerDef_t delayTimer     = {TIM1, 1000};
+STimerDef_t framerateTimer = {TIM14, 1000};
 
 // I2C:                      periph, SDA                     , SCL                     , WP                      , AFMODE
 SI2CPinDef_t g_R1_eepromI2C = {I2C1, { LL_GPIO_PIN_7, GPIOB }, { LL_GPIO_PIN_6, GPIOB }, { LL_GPIO_PIN_5, GPIOB }, LL_GPIO_AF_6 };
@@ -99,8 +99,8 @@ void initBoard(void)
     NVIC_SetPriority(SysTick_IRQn, 3);
     initSysclock();
 
-    initTimer(&timer1);
-    initTimer(&timer14);
+    initTimer(&delayTimer);
+    initTimer(&framerateTimer);
 
     NVIC_SetPriority(DMA1_Channel1_IRQn, 0);
     NVIC_EnableIRQ(DMA1_Channel1_IRQn);
@@ -119,7 +119,7 @@ void initBoard(void)
 
 void hwDelayMs(uint32_t ms)
 {
-    timerDelay(&timer1, ms);
+    timerDelay(&delayTimer, ms);
 }
 
 //=====================================================================================================================

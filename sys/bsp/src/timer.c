@@ -28,6 +28,8 @@
 // Globals
 //=====================================================================================================================
 
+static displayFramerateTimerCallback g_fnFramerateCallback = NULL;
+
 //=====================================================================================================================
 // Function prototypes
 //=====================================================================================================================
@@ -45,14 +47,19 @@ void initTimer(STimerDef_t const *pTimerDef)
     if (pTimerDef->pHWTimer == TIM1)
     {
         LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM1);
+        LL_TIM_SetPrescaler(pTimerDef->pHWTimer, __LL_TIM_CALC_PSC(SystemCoreClock, pTimerDef->period));
+        TIM1->ARR = 0xFFFFFFFF;
     }
     else if (pTimerDef->pHWTimer == TIM14)
     {
         LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM14);
+        LL_TIM_SetPrescaler(pTimerDef->pHWTimer, __LL_TIM_CALC_PSC(SystemCoreClock, pTimerDef->period));
+        LL_TIM_SetAutoReload(TIM14, __LL_TIM_CALC_ARR(SystemCoreClock, LL_TIM_GetPrescaler(TIM14), 33)); // 30fps tick
+        LL_TIM_EnableIT_UPDATE(TIM14);
+        NVIC_SetPriority(TIM14_IRQn, 0);
     }
 
-    LL_TIM_SetPrescaler(pTimerDef->pHWTimer, __LL_TIM_CALC_PSC(SystemCoreClock, pTimerDef->period));
-    pTimerDef->pHWTimer->ARR = 0xFFFFFFFF;
+    
     LL_TIM_EnableCounter(pTimerDef->pHWTimer);
 }
 
@@ -104,6 +111,23 @@ void initRtosTimer(void)
 uint32_t rtosTimerGetValue(void)
 {
     return TIM17->CNT;
+}
+
+void registerDisplayFramerateTimerCallback(displayFramerateTimerCallback fnCb)
+{
+    if (fnCb == NULL) return;
+    g_fnFramerateCallback = fnCb;
+    NVIC_EnableIRQ(TIM14_IRQn);
+}
+
+
+void TIM14_IRQHandler(void)
+{
+    if (LL_TIM_IsActiveFlag_UPDATE(TIM14))
+    {
+        LL_TIM_ClearFlag_UPDATE(TIM14);
+        g_fnFramerateCallback();
+    }
 }
 
 //=====================================================================================================================

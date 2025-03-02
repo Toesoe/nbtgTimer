@@ -158,29 +158,18 @@ void spiInitDisplayDMA(spiStatusCallback dmaStatusCb)
 
 void spiTransferBlockDMA(SSPITransfer_t *pDMATransferCtx)
 {
-    g_pCurrentTransfer = pDMATransferCtx;
-    g_pCurrentTransfer->transferred = 0;
-
-    // LL_I2C_DisableIT_TX(I2C2);
-    // LL_I2C_DisableIT_RX(I2C2);
-    // LL_I2C_DisableIT_NACK(I2C2);
-    // LL_I2C_DisableIT_ERR(I2C2);
-    // LL_I2C_DisableIT_STOP(I2C2);
-    // LL_I2C_DisableIT_TC(I2C2);
 
     LL_DMA_ConfigAddresses(DMA1, LL_DMA_CHANNEL_2,
-      (uint32_t)g_pCurrentTransfer->pBuffer,
+      (uint32_t)pDMATransferCtx->pBuffer,
       (uint32_t)LL_SPI_DMA_GetRegAddr(g_pSPIPeripheral),
       LL_DMA_GetDataTransferDirection(DMA1, LL_DMA_CHANNEL_2)
     );
 
-    LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_2, g_pCurrentTransfer->len);
+    LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_2, pDMATransferCtx->len);
     LL_SPI_EnableDMAReq_TX(g_pSPIPeripheral);
     LL_SPI_Enable(g_pSPIPeripheral);
     selectDisplay(true);
     LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_2);
-
-    // use SPI TX complete int to raise CS
 }
 
 __attribute__((interrupt)) void SPI1_IRQHandler(void)
