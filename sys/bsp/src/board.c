@@ -12,6 +12,7 @@
 #include "board.h"
 
 #include "stm32g070xx.h"
+#include "timer.h"
 
 #include <stm32g0xx_ll_rcc.h>
 #include <stm32g0xx_ll_exti.h>
@@ -35,8 +36,9 @@
 // Globals
 //=====================================================================================================================
 
-STimerDef_t delayTimer     = {TIM1, 1000};
-STimerDef_t framerateTimer = {TIM14, 1000};
+STimerDef_t delayTimer     = {TIMER_SYS_DELAY, TIM1, 1000, nullptr, nullptr};
+STimerDef_t framerateTimer = {TIMER_FRAMERATE, TIM14, 1000, nullptr, nullptr};
+STimerDef_t enlargerTimer  = {TIMER_ENLARGER_LAMP_ENABLE, TIM15, 1000, nullptr, nullptr};
 
 // I2C:                      periph, SDA                     , SCL                     , WP                      , AFMODE
 SI2CPinDef_t g_R1_eepromI2C = {I2C1, { LL_GPIO_PIN_7, GPIOB }, { LL_GPIO_PIN_6, GPIOB }, { LL_GPIO_PIN_5, GPIOB }, LL_GPIO_AF_6 };
@@ -101,6 +103,7 @@ void initBoard(void)
 
     initTimer(&delayTimer);
     initTimer(&framerateTimer);
+    initTimer(&enlargerTimer);
 
     NVIC_SetPriority(DMA1_Channel1_IRQn, 0);
     NVIC_EnableIRQ(DMA1_Channel1_IRQn);

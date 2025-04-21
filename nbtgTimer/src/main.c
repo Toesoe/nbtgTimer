@@ -104,13 +104,8 @@ const unsigned char logo [] = {
 
 void infinitelp(void *param)
 {
-    uint32_t times[12];
-
-    getTimeTable(10100, false, 6, FSTOP_SIXTH, times);
-    
-    genererateTestStrip(10100, 12, FSTOP_THIRD, times);
-
     dispDrawBitmap((SPoint_t){0, 0}, logo, 128, 64, COLOR_WHITE);
+
     while(true)
     {
         vTaskDelay(1000);

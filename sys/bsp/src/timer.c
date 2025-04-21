@@ -24,11 +24,18 @@
 // Types
 //=====================================================================================================================
 
+typedef struct
+{
+    fnTimCallback fnCb;
+    void *        pUserCtx;
+} STimerIRQCallback_t;
+
 //=====================================================================================================================
 // Globals
 //=====================================================================================================================
 
-static displayFramerateTimerCallback g_fnFramerateCallback = NULL;
+static STimerIRQCallback_t g_framerateCallback = {0};
+static STimerIRQCallback_t g_enlargerCallback = {0};
 
 //=====================================================================================================================
 // Function prototypes
@@ -49,6 +56,7 @@ void initTimer(STimerDef_t const *pTimerDef)
         LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM1);
         LL_TIM_SetPrescaler(pTimerDef->pHWTimer, __LL_TIM_CALC_PSC(SystemCoreClock, pTimerDef->period));
         TIM1->ARR = 0xFFFFFFFF;
+        LL_TIM_EnableCounter(pTimerDef->pHWTimer);
     }
     else if (pTimerDef->pHWTimer == TIM14)
     {
@@ -57,12 +65,27 @@ void initTimer(STimerDef_t const *pTimerDef)
         LL_TIM_SetAutoReload(TIM14, __LL_TIM_CALC_ARR(SystemCoreClock, LL_TIM_GetPrescaler(TIM14), 33)); // 30fps tick
         LL_TIM_EnableIT_UPDATE(TIM14);
         NVIC_SetPriority(TIM14_IRQn, 0);
+        LL_TIM_EnableCounter(pTimerDef->pHWTimer);
     }
-
-    
-    LL_TIM_EnableCounter(pTimerDef->pHWTimer);
+    else if (pTimerDef->pHWTimer == TIM15)
+    {
+        LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM15);
+        LL_TIM_SetPrescaler(pTimerDef->pHWTimer, __LL_TIM_CALC_PSC(SystemCoreClock, pTimerDef->period));
+        LL_TIM_EnableIT_UPDATE(TIM15);
+        NVIC_SetPriority(TIM15_IRQn, 0);
+    }
 }
 
+/**
+ * @brief start enlarger timer
+ * 
+ * @param duration in milliseconds, for lamp to remain on
+ */
+void startEnlargerTimer(uint32_t duration)
+{
+    LL_TIM_SetAutoReload(TIM15, __LL_TIM_CALC_ARR(SystemCoreClock, LL_TIM_GetPrescaler(TIM15), duration));
+    LL_TIM_EnableCounter(TIM15);
+}
 
 /**
  * @brief get value of counter register on specific timer
@@ -113,20 +136,43 @@ uint32_t rtosTimerGetValue(void)
     return TIM17->CNT;
 }
 
-void registerDisplayFramerateTimerCallback(displayFramerateTimerCallback fnCb)
+void registerTimerCallback(ETimerType_t timerType, fnTimCallback fnCb, void *pUserData)
 {
-    if (fnCb == NULL) return;
-    g_fnFramerateCallback = fnCb;
-    NVIC_EnableIRQ(TIM14_IRQn);
+    switch(timerType)
+    {
+        case TIMER_ENLARGER_LAMP_ENABLE:
+        {
+            g_enlargerCallback.fnCb = fnCb;
+            g_enlargerCallback.pUserCtx = pUserData;
+            break;
+        }
+        case TIMER_FRAMERATE:
+        {
+            g_framerateCallback.fnCb = fnCb;
+            g_framerateCallback.pUserCtx = pUserData;
+            break;
+        }
+        default:
+        break;
+    }
 }
-
 
 void TIM14_IRQHandler(void)
 {
     if (LL_TIM_IsActiveFlag_UPDATE(TIM14))
     {
         LL_TIM_ClearFlag_UPDATE(TIM14);
-        g_fnFramerateCallback();
+        if (g_framerateCallback.fnCb) g_framerateCallback.fnCb(g_framerateCallback.pUserCtx);
+    }
+}
+
+void TIM15_IRQHandler(void)
+{
+    if (LL_TIM_IsActiveFlag_UPDATE(TIM15))
+    {
+        LL_TIM_DisableCounter(TIM15);
+        LL_TIM_ClearFlag_UPDATE(TIM15);
+        if (g_enlargerCallback.fnCb) g_enlargerCallback.fnCb(g_enlargerCallback.pUserCtx);
     }
 }
 

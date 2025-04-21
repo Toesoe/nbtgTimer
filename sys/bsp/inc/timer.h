@@ -26,11 +26,19 @@ extern "C"
 // Types
 //=====================================================================================================================
 
-typedef void (*displayFramerateTimerCallback)(void);
+typedef enum
+{
+    TIMER_SYS_DELAY,
+    TIMER_FRAMERATE,
+    TIMER_ENLARGER_LAMP_ENABLE,
+} ETimerType_t;
+
+typedef void (*fnTimCallback)(void *userCtx);
 
 /** @brief struct that defines a timer */
 typedef struct
 {
+    ETimerType_t timerType;
     TIM_TypeDef *pHWTimer; //< the hardware timer used for this timerdef
     uint32_t     period;   //< the interval period in Hz (1000 = second timer, etc)
 } STimerDef_t;
@@ -45,13 +53,15 @@ typedef struct
 
 void initTimer(STimerDef_t const *);
 void timerDelay(STimerDef_t const *, const uint32_t);
+
+void startEnlargerTimer(uint32_t);
 uint32_t timerGetValue(STimerDef_t const *);
 
 // freertos system timers
 void initRtosTimer(void);
 uint32_t rtosTimerGetValue(void);
 
-void registerDisplayFramerateTimerCallback(displayFramerateTimerCallback);
+void registerTimerCallback(ETimerType_t, fnTimCallback, void *);
 
 #ifdef __cplusplus
 }

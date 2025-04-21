@@ -1,34 +1,18 @@
 /**
  * @file display.c
  *
- * @brief display routines for nbtgTimer
+ * @brief display routines
  *
  * using horizontal addressing and DMA we get about 60fps at 8MHz: 30 is plenty so we use a hw timer on autoreload
  * built for SSD1309 displays in Mode 5
  *
- * graphical display parts pulled from https://github.com/DuyTrandeLion/nrf52-ssd1309, which is licensed under MIT:
+ * graphics routines are based on https://github.com/DuyTrandeLion/nrf52-ssd1309, which is licensed under MIT.
  *
- *  MIT License
+ * improvements in this version:
+ * - double buffering
+ * - horizontal addressing mode, allows for DMA'ing the full framebuffer in 1 chunk
+ * - removed dependency on floating point math, fixed-point implementations
  *
- * Copyright (c) 2021 Duy Lion Tran
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
 //=====================================================================================================================
@@ -37,52 +21,72 @@
 
 #include "display.h"
 
-#include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stm32g0xx_ll_system.h>
 #include <string.h>
 
 #include "board.h"
+#include "timer.h"
 
 //=====================================================================================================================
 // Defines
 //=====================================================================================================================
 
-#define SSD1309_WIDTH             128
-#define SSD1309_HEIGHT            64
+#define SSD1309_WIDTH                 128
+#define SSD1309_HEIGHT                64
 
-#define SSD1309_PAGE_SIZE_BYTES   128
-#define SSD1309_ROW_SIZE_BYTES    16
-#define SSD1309_GDDRAM_SIZE_BYTES 1024
-#define SSD1309_NUM_PAGES         8
+#define SSD1309_PAGE_SIZE_BYTES       128
+#define SSD1309_ROW_SIZE_BYTES        16
+#define SSD1309_GDDRAM_SIZE_BYTES     1024
+#define SSD1309_NUM_PAGES             8
 
-#define SSD1309_I2C_ADDR          0x78
+#define SSD1309_I2C_ADDR              0x78
 
-#define DEG_TO_RAD(a)             (a * 3.14 / 180.0)
+#define CIRCLE_APPROXIMATION_SEGMENTS 36   // this gives a segment every 10 degrees
+#define FIXED_POINT_MATH_SCALE        1024 // 2^10 fixed point scale
+
+#define DEG_TO_RAD(a)                 (a * 3.14 / 180.0)
+
+//=====================================================================================================================
+// Constants
+//=====================================================================================================================
+
+/** @brief precomputed cosine table, cos(i * 5 deg) * SCALE */
+static const int16_t g_cosLUT[72] = { 1024,  1020,  1008,  989,  962,  928,  887,  839,  784,  724,  658,   587,
+                                      512,   433,   350,   265,  178,  89,   0,    -89,  -178, -265, -350,  -433,
+                                      -512,  -587,  -658,  -724, -784, -839, -887, -928, -962, -989, -1008, -1020,
+                                      -1024, -1020, -1008, -989, -962, -928, -887, -839, -784, -724, -658,  -587,
+                                      -512,  -433,  -350,  -265, -178, -89,  0,    89,   178,  265,  350,   433,
+                                      512,   587,   658,   724,  784,  839,  887,  928,  962,  989,  1008,  1020 };
 
 //=====================================================================================================================
 // Types
 //=====================================================================================================================
 
+/** @brief page/row union type. allows accessing pages in full or per-row */
 typedef union
 {
     uint8_t page[SSD1309_PAGE_SIZE_BYTES];
     uint8_t rows[8][SSD1309_ROW_SIZE_BYTES];
 } __attribute__((packed)) UPageRow_t;
 
+/** @brief framebuffer union type. full buffer consists of 8 pages. */
 typedef union
 {
     uint8_t    buffer[SSD1309_GDDRAM_SIZE_BYTES];
     UPageRow_t pages[8];
 } __attribute__((packed)) UFrameBuffer_t;
 
+/** @brief main framebuffer struct. this implementation is double-buffered so we have 2 buffers of 1K */
 typedef struct
 {
     __attribute__((aligned(4))) UFrameBuffer_t buffer1;
     __attribute__((aligned(4))) UFrameBuffer_t buffer2;
 } SFrameBuffer_t;
 
+/** @brief display command struct. allows passing in optional parameters */
 typedef struct
 {
     uint8_t command;
@@ -90,6 +94,7 @@ typedef struct
     bool    hasParameter;
 } SDisplayCommand_t;
 
+/** @brief DMA transfer context */
 typedef struct
 {
     uint8_t  address; // not used for SPI but used for bitcompat with SI2CTransfer_t
@@ -98,6 +103,7 @@ typedef struct
     size_t   transferred;
 } SDMATranferContext_t;
 
+/** @brief main display driver context */
 typedef struct
 {
     bool                 isEnabled;
@@ -108,6 +114,7 @@ typedef struct
 
     UFrameBuffer_t      *pFrontBuffer;
     UFrameBuffer_t      *pBackBuffer;
+    bool                 fbModified;
     uint8_t              currentX;
     uint8_t              currentY;
 } SDisplayContext_t;
@@ -116,57 +123,42 @@ typedef struct
 // Globals
 //=====================================================================================================================
 
+SFrameBuffer_t           g_framebuffers;
 static SDisplayContext_t g_displayContext = { 0 };
 
-SFrameBuffer_t           g_framebuffers;
-
-SPixel_t                 g_pxl = {
-    (SPoint_t){ 1, 1 },
-    COLOR_WHITE
-};
-
-SPixel_t                 g_pxl_b = {
-    (SPoint_t){ 1, 1 },
-    COLOR_BLACK
-};
-
+/** @brief initialization sequence for SSD1309 in Mode 5 */
 SDisplayCommand_t SSD1309_INIT_SEQ[] = {
-    (SDisplayCommand_t){ SSD1309_DISPLAY_OFF,                            0x00, false },
+    (SDisplayCommand_t){ SSD1309_DISPLAY_OFF,           0x00, false },
 
-    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_CLOCK_DIV,                  0xA0,
-                        true                                                         }, // clock divide ratio (0x00=1) and oscillator frequency (0x8)
-    (SDisplayCommand_t){ SSD1309_SET_MULTIPLEX,                          0x3F, true  },
-    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_OFFSET,                     0x00, true  },
-    (SDisplayCommand_t){ SSD1309_SET_START_LINE,                         0x00, false },
-    (SDisplayCommand_t){ SSD1309_SET_MASTER_CONFIG,                      0x8E, true  },
-    //(SDisplayCommand_t){ SSD1309_CHARGE_PUMP,                            0x14, true  },
-    (SDisplayCommand_t){ SSD1309_MEMORY_MODE,                            0x00, true  },
-    (SDisplayCommand_t){ SSD1309_SEG_REMAP_FLIP,                         0x00, false },
-    (SDisplayCommand_t){ SSD1309_COM_SCAN_DEC,                           0x00, false },
-    (SDisplayCommand_t){ SSD1309_SET_COM_PINS,                           0x12,
-                        true                                                         }, // alternative com pin config (bit 4), disable left/right remap (bit 5) -> datasheet
+    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_CLOCK_DIV, 0xA0,
+                        true                                        }, // clock divide ratio (0x00=1) and oscillator frequency (0x8)
+    (SDisplayCommand_t){ SSD1309_SET_MULTIPLEX,         0x3F, true  },
+    (SDisplayCommand_t){ SSD1309_SET_DISPLAY_OFFSET,    0x00, true  },
+    (SDisplayCommand_t){ SSD1309_SET_START_LINE,        0x00, false },
+    (SDisplayCommand_t){ SSD1309_SET_MASTER_CONFIG,     0x8E, true  },
+    (SDisplayCommand_t){ SSD1309_MEMORY_MODE,           0x00, true  },
+    (SDisplayCommand_t){ SSD1309_SEG_REMAP_FLIP,        0x00, false },
+    (SDisplayCommand_t){ SSD1309_COM_SCAN_DEC,          0x00, false },
+    (SDisplayCommand_t){ SSD1309_SET_COM_PINS,          0x12,
+                        true                                        }, // alternative com pin config (bit 4), disable left/right remap (bit 5) -> datasheet
     // option 5 with COM_SCAN_INC, 8 with COM_SCAN_DEC
-    (SDisplayCommand_t){ SSD1309_SET_CONTRAST,                           0x6F, true  },
-    (SDisplayCommand_t){ SSD1309_SET_PRECHARGE,                          0xF1, true  }, // precharge period 0end.end.x/F1
-    (SDisplayCommand_t){ SSD1309_SET_VCOM_DESELECT,                      0x30, true  }, // vcomh deselect level
+    (SDisplayCommand_t){ SSD1309_SET_CONTRAST,          0x6F, true  },
+    (SDisplayCommand_t){ SSD1309_SET_PRECHARGE,         0xF1, true  }, // precharge period 0end.end.x/F1
+    (SDisplayCommand_t){ SSD1309_SET_VCOM_DESELECT,     0x30, true  }, // vcomh deselect level
 
-    (SDisplayCommand_t){ SSD1309_DEACTIVATE_SCROLL,                      0x00, false },
-    (SDisplayCommand_t){ SSD1309_DISPLAY_ALL_ON_RESUME,                  0x00, false }, // normal mode: ram -> display
-    (SDisplayCommand_t){ SSD1309_NORMAL_DISPLAY,                         0x00, false }, // non-inverted mode
-
-    // only do this once: we send the entire framebuffer every time using DMA
-    // only valid for page addressing mode
-    //(SDisplayCommand_t){ SSD1309_COLUMN_START_ADDRESS_LOW_NIBBLE | 0x00, 0x00, false },
-    //(SDisplayCommand_t){ SSD1309_COLUMN_START_ADDRESS_HI_NIBBLE | 0x00,  0x00, false },
-    //(SDisplayCommand_t){ SSD1309_SET_PAGE_START_ADDRESS | 0x00,          0x00, false },
+    (SDisplayCommand_t){ SSD1309_DEACTIVATE_SCROLL,     0x00, false },
+    (SDisplayCommand_t){ SSD1309_DISPLAY_ALL_ON_RESUME, 0x00, false }, // normal mode: ram -> display
+    (SDisplayCommand_t){ SSD1309_NORMAL_DISPLAY,        0x00, false }, // non-inverted mode
 };
 
+/** @brief command sequence for flipped mode (default) */
 static const SDisplayCommand_t SSD1309_FLIP0_SEQ[] = {
     // default mode
     (SDisplayCommand_t){ SSD1309_SEG_REMAP_FLIP, 0x00, false },
     (SDisplayCommand_t){ SSD1309_COM_SCAN_DEC,   0x00, false },
 };
 
+/** @brief command sequence for non-flipped mode */
 static const SDisplayCommand_t SSD1309_FLIP1_SEQ[] = {
     (SDisplayCommand_t){ SSD1309_SEG_REMAP_NORMAL, 0x00, false },
     (SDisplayCommand_t){ SSD1309_COM_SCAN_INC,     0x00, false },
@@ -176,26 +168,34 @@ static const SDisplayCommand_t SSD1309_FLIP1_SEQ[] = {
 // Static protos
 //=====================================================================================================================
 
-static uint16_t dispNormalizeTo0_360(uint16_t);
+static void           dispWriteCommand(SDisplayCommand_t);
+static void           dispSyncFramebuffer(void *);
 
-static void     dispWriteCommand(SDisplayCommand_t);
-static void     dispSyncFramebuffer(void);
+static void           dispDMACallback(bool);
 
-static void     dispDMACallback(bool);
-static void     dispRegularCallback(bool);
+static void           drawArc(SPoint_t, uint8_t, uint16_t, uint16_t, uint16_t, uint16_t, uint16_t, uint8_t, EColor_t);
 
-static void     testPage(uint8_t);
+static inline int16_t fxp_sin(uint16_t);
+static inline int16_t fxp_cos(uint16_t);
 
 //=====================================================================================================================
 // Functions
 //=====================================================================================================================
 
+/**
+ * @brief initialize display driver; setup buffers, configure display
+ *
+ * @param displayMode SPI or I2C
+ */
 void initDisplay(EDisplayMode_t displayMode)
 {
     g_displayContext.mode          = displayMode;
     g_displayContext.DMAInProgress = false;
     g_displayContext.DMAIsEnabled  = false;
     g_displayContext.isEnabled     = false;
+    g_displayContext.fbModified    = false;
+    g_displayContext.currentX      = 0;
+    g_displayContext.currentY      = 0;
 
     memset(&g_framebuffers.buffer1.buffer, 0, SSD1309_GDDRAM_SIZE_BYTES);
     memset(&g_framebuffers.buffer2.buffer, 0, SSD1309_GDDRAM_SIZE_BYTES);
@@ -218,7 +218,7 @@ void initDisplay(EDisplayMode_t displayMode)
     {
         // SPI stuff
         spiInitDisplayDMA(dispDMACallback);
-        registerDisplayFramerateTimerCallback(dispSyncFramebuffer);
+        registerTimerCallback(TIMER_FRAMERATE, dispSyncFramebuffer, nullptr);
         resetDisplay(true);
         hwDelayMs(10);
         resetDisplay(false);
@@ -230,16 +230,18 @@ void initDisplay(EDisplayMode_t displayMode)
         dispWriteCommand(SSD1309_INIT_SEQ[i]);
     }
 
-    //uint8_t buf[5] = { 0x91, 0x3F, 0x3F, 0x3F, 0x3F };
-    //spiSendCommand(buf, 5);
-
     g_displayContext.DMAIsEnabled = true;
-    g_displayContext.isEnabled = true;
+    g_displayContext.isEnabled    = true;
     hwDelayMs(100);
 
     dispWriteCommand((SDisplayCommand_t){ SSD1309_DISPLAY_ON, 0x00, false });
 }
 
+/**
+ * @brief turn display on or off
+ *
+ * @param enable if true, turns display on, else off
+ */
 void toggleDisplay(bool enable)
 {
     if (enable)
@@ -255,10 +257,9 @@ void toggleDisplay(bool enable)
 }
 
 /**
- * @brief draw a pixel in the display buffer
+ * @brief draw a pixel in the backbuffer
  *
- * offsets are based on 1,1. calculations are performed inside to ensure page alignment.
- *
+ * @param pixel pixel to draw {x, y}. pixels are based on a 1,1 offset
  */
 void dispDrawPixel(SPixel_t pixel)
 {
@@ -298,10 +299,12 @@ void dispDrawPixel(SPixel_t pixel)
     {
         g_displayContext.pFrontBuffer->pages[page].page[x] &= ~(1 << bitPosition);
     }
+
+    g_displayContext.fbModified = true;
 }
 
 /**
- * @brief draw a line with Bresenham's algo
+ * @brief draw a line with Bresenham's algorithm
  *
  * @param line line to draw
  */
@@ -327,12 +330,9 @@ void dispDrawLine(SLine_t line)
 
     while (1)
     {
-        // DEBUG: Print coordinates for tracing
-        // printf("Drawing at: (%d, %d)\n", x0 + 1, y0 + 1);
-
         dispDrawPixel((SPixel_t){
         { x0 + 1, y0 + 1 },
-        COLOR_WHITE
+        line.color
         });
 
         if (x0 == x1 && y0 == y1) break;
@@ -351,33 +351,42 @@ void dispDrawLine(SLine_t line)
     }
 }
 
-char dispWriteChar(char ch, FontDef Font, EColor_t color)
+/**
+ * @brief write a single character to the display
+ *
+ * @param ch character to write
+ * @param font font to use
+ * @param color white or black
+ * @return char the written char, or 0 on end/error
+ *
+ * @note this function makes use of the internal currentX and currentY pointers. if you want to write a char to an
+ * arbitrary location make sure to set these to the right location first using dispSetCursor()
+ */
+char dispWriteChar(char ch, FontDef font, EColor_t color)
 {
-    uint32_t i, b, j;
-
-    /* Check if character is valid */
-    if (ch < 32 || ch > 126)
+    // verify ch is a valid ascii character: table goes from ' ' to '~'
+    if (ch < 0x20 || ch > 0x7E)
     {
         return 0;
     }
 
-    /* Check remaining space on current line */
-    if ((SSD1309_WIDTH < (g_displayContext.currentX + Font.FontWidth)) ||
-        (SSD1309_HEIGHT < (g_displayContext.currentY + Font.FontHeight)))
+    // check if we have space on the current line
+    if ((SSD1309_WIDTH < (g_displayContext.currentX + font.FontWidth)) ||
+        (SSD1309_HEIGHT < (g_displayContext.currentY + font.FontHeight)))
     {
-        /* Not enough space on current line */
         return 0;
     }
 
-    /* Use the font to write */
-    for (i = 0; i < Font.FontHeight; i++)
+    for (size_t i = 0; i < font.FontHeight; i++)
     {
-        b = Font.data[(ch - 32) * Font.FontHeight + i];
+        uint16_t character = font.data[(ch - 0x20) * font.FontHeight + i];
 
-        for (j = 0; j < Font.FontWidth; j++)
+        for (size_t j = 0; j < font.FontWidth; j++)
         {
-            if ((b << j) & 0x8000)
+            // AND with 0x8000 to check bits in reverse
+            if ((character << j) & 0x8000)
             {
+                // if true, we should set this pixel
                 dispDrawPixel((SPixel_t){
                 { g_displayContext.currentX + j, (g_displayContext.currentY + i) },
                 color
@@ -385,6 +394,7 @@ char dispWriteChar(char ch, FontDef Font, EColor_t color)
             }
             else
             {
+                // if false, it's blank
                 dispDrawPixel((SPixel_t){
                 { g_displayContext.currentX + j, (g_displayContext.currentY + i) },
                 !color
@@ -393,175 +403,138 @@ char dispWriteChar(char ch, FontDef Font, EColor_t color)
         }
     }
 
-    /* The current space is now taken */
-    g_displayContext.currentX += Font.FontWidth;
+    g_displayContext.currentX += font.FontWidth;
 
     return ch;
 }
 
-char dispWriteString(const char *str, FontDef Font, EColor_t color)
+/**
+ * @brief write a string to the display
+ *
+ * @param str string to write
+ * @param font font to use
+ * @param color white or black
+ * @return char the last written char that succeeded, or 0 on end/error
+ *
+ * @note this function makes use of the internal currentX and currentY pointers. if you want to write a string to an
+ * arbitrary location make sure to set these to the right location first using dispSetCursor()
+ */
+char dispWriteString(const char *str, FontDef font, EColor_t color)
 {
-    /* Write until null-byte */
+    // write until char routine returns 0
     while (*str)
     {
-        if (dispWriteChar(*str, Font, color) != *str)
+        if (dispWriteChar(*str, font, color) != *str)
         {
-            /* Char could not be written */
             return *str;
         }
 
-        /* Next char */
         str++;
     }
 
-    /* Everything ok */
     return *str;
 }
 
+/**
+ * @brief set cursor location in config struct
+ *
+ * @param x x location
+ * @param y y location
+ */
 void dispSetCursor(uint8_t x, uint8_t y)
 {
     g_displayContext.currentX = x;
     g_displayContext.currentY = y;
 }
 
-void dispDrawArc(SPoint_t center, uint8_t radius, uint16_t start_angle, uint16_t sweep, EColor_t color)
+/**
+ * @brief draw a circle or an arc (partial circle). consolidates multiple functions
+ * 
+ * @param center 
+ * @param radius 
+ * @param start_deg 
+ * @param sweep_deg 
+ * @param seg_count 
+ * @param dash_on_deg 
+ * @param dash_off_deg 
+ * @param thickness 
+ * @param draw_caps 
+ * @param fill 
+ * @param color 
+ */
+void dispDrawCircleShape(SPoint_t center, uint8_t radius, uint16_t start_deg, uint16_t sweep_deg, uint8_t seg_count,
+                         uint16_t dash_on_deg, uint16_t dash_off_deg, uint8_t thickness, bool draw_caps, bool fill,
+                         EColor_t color)
 {
-#define CIRCLE_APPROXIMATION_SEGMENTS 36
-    float    approx_degree;
-    uint32_t approx_segments;
-    uint8_t  xp1, xp2;
-    uint8_t  yp1, yp2;
-    uint16_t loc_sweep       = 0;
-    uint16_t loc_angle_count = 0;
-    uint32_t count           = 0;
+    if (seg_count == 0 || radius == 0 || thickness == 0 || sweep_deg == 0) return;
 
-    float    rad;
+    start_deg %= 360;
+    if (sweep_deg > 360) sweep_deg = 360;
 
-    loc_sweep       = dispNormalizeTo0_360(sweep);
-    loc_angle_count = dispNormalizeTo0_360(start_angle);
-
-    count           = (loc_angle_count * CIRCLE_APPROXIMATION_SEGMENTS) / 360;
-    approx_segments = (loc_sweep * CIRCLE_APPROXIMATION_SEGMENTS) / 360;
-    approx_degree   = loc_sweep / (float)approx_segments;
-
-    while (count < approx_segments)
+    if (fill)
     {
-        xp1 = center.x + (int8_t)(sin(rad) * radius);
-        yp1 = center.y + (int8_t)(cos(rad) * radius);
-        count++;
-#if 1
-        if (count != approx_segments)
+        // Draw filled circle using concentric circles with increasing radius
+        for (uint8_t r = 0; r <= radius; ++r)
         {
-            rad = DEG_TO_RAD(count * approx_degree);
+            for (uint8_t t = 0; t < thickness; ++t)
+            {
+                drawArc(center, r, start_deg, sweep_deg, seg_count, dash_on_deg, dash_off_deg, t + 1, color);
+            }
         }
-        else
+    }
+    else
+    {
+        // Draw just the arc (non-filled)
+        for (uint8_t t = 0; t < thickness; ++t)
         {
-            rad = DEG_TO_RAD(loc_sweep);
+            drawArc(center, radius + t, start_deg, sweep_deg, seg_count, dash_on_deg, dash_off_deg, t + 1, color);
         }
-#endif
-        xp2 = center.x + (int8_t)(sin(rad) * radius);
-        yp2 = center.y + (int8_t)(cos(rad) * radius);
-        dispDrawLine((SLine_t){
-        { xp1, yp1 },
-        { xp2, yp2 },
-        color
-        });
+    }
+
+    // Draw caps (start and end points)
+    if (draw_caps)
+    {
+        uint16_t end_deg = (start_deg + sweep_deg) % 360;
+
+        for (uint8_t t = 0; t < thickness; ++t)
+        {
+            int16_t xs = center.x + (radius * fxp_sin(start_deg)) / FIXED_POINT_MATH_SCALE;
+            int16_t ys = center.y + (radius * fxp_cos(start_deg)) / FIXED_POINT_MATH_SCALE;
+            int16_t xe = center.x + (radius * fxp_sin(end_deg)) / FIXED_POINT_MATH_SCALE;
+            int16_t ye = center.y + (radius * fxp_cos(end_deg)) / FIXED_POINT_MATH_SCALE;
+
+            dispDrawPixel((SPixel_t){
+            { xs, ys },
+            color
+            });
+            dispDrawPixel((SPixel_t){
+            { xe, ye },
+            color
+            });
+
+            ++radius; // expand caps with thickness
+        }
     }
 }
 
-void dispDrawCircle(SPoint_t center, uint8_t radius, EColor_t color, bool fill)
-{
-    int32_t x   = -radius;
-    int32_t y   = 0;
-    int32_t err = 2 - 2 * radius;
-    int32_t e2;
-
-    if (center.x > SSD1309_WIDTH || center.y > SSD1309_HEIGHT)
-    {
-        return;
-    }
-
-    do
-    {
-        if (!fill)
-        {
-            dispDrawPixel((SPixel_t){
-            { center.x - x, center.y + y },
-            color
-            });
-            dispDrawPixel((SPixel_t){
-            { center.x + x, center.y + y },
-            color
-            });
-            dispDrawPixel((SPixel_t){
-            { center.x + x, center.y - y },
-            color
-            });
-            dispDrawPixel((SPixel_t){
-            { center.x - x, center.y - y },
-            color
-            });
-        }
-        else
-        {
-            for (uint8_t _y = (center.y + y); _y >= (center.y - y); _y--)
-            {
-                for (uint8_t _x = (center.x - x); _x >= (center.x + x); _x--)
-                {
-                    dispDrawPixel((SPixel_t){
-                    { _x, _y },
-                    color
-                    });
-                }
-            }
-        }
-        e2 = err;
-
-        if (e2 <= y)
-        {
-            y++;
-            err = err + (y * 2 + 1);
-
-            if (-x == y && e2 <= x)
-            {
-                e2 = 0;
-            }
-            else
-            {
-                /* Nothing to do */
-            }
-        }
-        else
-        {
-            /* Nothing to do */
-        }
-
-        if (e2 > x)
-        {
-            x++;
-            err = err + (x * 2 + 1);
-        }
-        else
-        {
-            /* Nothing to do */
-        }
-    }
-    while (x <= 0);
-
-    return;
-}
-
-void dispDrawPolyline(const SPoint_t *par_vertex, uint16_t par_size, EColor_t color)
+/**
+ * @brief draw a polyline
+ *
+ * @param pVertices        array of vertices to draw between
+ * @param countVertices    length of pVertices
+ * @param color            white or black
+ */
+void dispDrawPolyline(const SPoint_t *pVertices, uint16_t countVertices, EColor_t color)
 {
     uint16_t i;
 
-    if (par_vertex != NULL)
+    if (pVertices != NULL)
     {
-        for (i = 1; i < par_size; i++)
+        for (i = 1; i < countVertices; i++)
         {
             dispDrawLine((SLine_t){
-            { par_vertex[i - 1].x, par_vertex[i - 1].y },
-            { par_vertex[i].x,     par_vertex[i].y     },
+            { pVertices[i - 1].x, pVertices[i - 1].y },
+            { pVertices[i].x,     pVertices[i].y     },
             color
             });
         }
@@ -573,6 +546,13 @@ void dispDrawPolyline(const SPoint_t *par_vertex, uint16_t par_size, EColor_t co
     return;
 }
 
+/**
+ * @brief draw a rectangle between two points
+ *
+ * @param start start point
+ * @param end   end point
+ * @param color white or black
+ */
 void dispDrawRectangle(SPoint_t start, SPoint_t end, EColor_t color)
 {
     dispDrawLine((SLine_t){
@@ -597,6 +577,13 @@ void dispDrawRectangle(SPoint_t start, SPoint_t end, EColor_t color)
     });
 }
 
+/**
+ * @brief draw a filled rectangle between two points
+ *
+ * @param start start point
+ * @param end   end point
+ * @param color white or black
+ */
 void dispDrawFilledRectangle(SPoint_t start, SPoint_t end, EColor_t color)
 {
     uint8_t x_start = ((start.x <= end.x) ? start.x : end.x);
@@ -617,7 +604,17 @@ void dispDrawFilledRectangle(SPoint_t start, SPoint_t end, EColor_t color)
     return;
 }
 
-void dispDrawBitmap(SPoint_t coords, const unsigned char *bitmap, uint8_t w, uint8_t h, EColor_t color)
+/**
+ * @brief draw a bitmap. convert images using https://javl.github.io/image2cpp/ for example
+ * @todo write compression/decompression algorithm for bitmap blobs (heatshrink?)
+ *
+ * @param coords start coordinates for top-left pixel of bitmap
+ * @param bitmap pointer to bitmap data
+ * @param w      width of bitmap
+ * @param h      height of bitmap
+ * @param color  white or black
+ */
+void dispDrawBitmap(SPoint_t coords, const uint8_t *bitmap, uint8_t w, uint8_t h, EColor_t color)
 {
     uint8_t byte      = 0;
     int16_t byteWidth = (w + 7) / 8; /* Bitmap scanline pad = whole byte */
@@ -656,33 +653,63 @@ void dispDrawBitmap(SPoint_t coords, const unsigned char *bitmap, uint8_t w, uin
     return;
 }
 
-static uint16_t dispNormalizeTo0_360(uint16_t par_deg)
+/**
+ * @brief helper function to draw an arc using cosine LUT and fixed-point arithmetic
+ *
+ * @param center
+ * @param radius
+ * @param start_deg
+ * @param sweep_deg
+ * @param seg_count
+ * @param dash_on_deg
+ * @param dash_off_deg
+ * @param thickness
+ * @param color
+ */
+static void drawArc(SPoint_t center, uint8_t radius, uint16_t start_deg, uint16_t sweep_deg, uint16_t seg_count,
+                    uint16_t dash_on_deg, uint16_t dash_off_deg, uint8_t thickness, EColor_t color)
 {
-    uint16_t loc_angle;
-    if (par_deg <= 360)
+    uint16_t step_deg   = sweep_deg / seg_count;
+    uint16_t dash_total = dash_on_deg + dash_off_deg;
+    uint16_t dash_pos   = 0;
+    uint16_t angle      = start_deg;
+
+    for (uint16_t i = 0; i < seg_count; ++i)
     {
-        loc_angle = par_deg;
+        bool draw = true;
+
+        if (dash_total)
+        {
+            dash_pos = (dash_pos + step_deg) % dash_total;
+            draw     = (dash_pos < dash_on_deg);
+        }
+
+        if (!draw)
+        {
+            angle += step_deg;
+            continue;
+        }
+
+        int16_t x1 = center.x + (radius * fxp_sin(angle)) / FIXED_POINT_MATH_SCALE;
+        int16_t y1 = center.y + (radius * fxp_cos(angle)) / FIXED_POINT_MATH_SCALE;
+        int16_t x2 = center.x + (radius * fxp_sin(angle + step_deg)) / FIXED_POINT_MATH_SCALE;
+        int16_t y2 = center.y + (radius * fxp_cos(angle + step_deg)) / FIXED_POINT_MATH_SCALE;
+
+        dispDrawLine((SLine_t){
+        { x1, y1 },
+        { x2, y2 },
+        color
+        });
+
+        angle += step_deg;
     }
-    else
-    {
-        loc_angle = par_deg % 360;
-        loc_angle = ((par_deg != 0) ? par_deg : 360);
-    }
-    return loc_angle;
 }
 
-static void testPage(uint8_t page)
-{
-    page = 7 - page;
-
-    memset(g_displayContext.pFrontBuffer->buffer, 0, SSD1309_GDDRAM_SIZE_BYTES);
-    // Fill an entire page with all pixels on
-    for (int i = 0; i < SSD1309_PAGE_SIZE_BYTES; i++)
-    {
-        g_displayContext.pFrontBuffer->pages[page].page[i] = 0xFF;
-    }
-}
-
+/**
+ * @brief write a command to the display controller
+ *
+ * @param cmd command structure
+ */
 static void dispWriteCommand(SDisplayCommand_t cmd)
 {
     uint8_t buf[2] = { cmd.command };
@@ -693,43 +720,16 @@ static void dispWriteCommand(SDisplayCommand_t cmd)
     spiSendCommand(buf, (cmd.hasParameter ? 2 : 1));
 }
 
-static void dispResetPointers(void)
-{
-    uint8_t buf[]  = { 0x00, SSD1309_COLUMN_ADDR, 0x00, 0x7F };
-    uint8_t buf2[] = { 0x00, SSD1309_PAGE_ADDR, 0x00, 0x07 };
-
-    spiSendCommand(buf, 4);
-    spiSendCommand(buf2, 4);
-}
-
 /**
  * @brief yeet the framebuffer to the display using DMA
-
- TODO: add quick checksum to check if buffers need updating at all
  *
  */
-static void dispSyncFramebuffer(void)
+static void dispSyncFramebuffer(void *pCtx)
 {
-    if (!g_displayContext.isEnabled || !g_displayContext.DMAIsEnabled || g_displayContext.DMAInProgress) return;
+    if (!g_displayContext.isEnabled || !g_displayContext.DMAIsEnabled || !g_displayContext.fbModified || g_displayContext.DMAInProgress) return;
 
     g_displayContext.DMAInProgress                  = true;
     g_displayContext.dmaTransferContext.transferred = 0;
-
-    // dispDrawPixel(g_pxl);
-
-    // g_pxl.coordinates.x++;
-
-    // if (g_pxl.coordinates.x == SSD1309_WIDTH + 1)
-    // {
-        // g_pxl.coordinates.y++;
-        // g_pxl.coordinates.x = 1;
-    // }
-
-    // if (g_pxl.coordinates.y == SSD1309_HEIGHT + 1)
-    // {
-        // g_pxl.coordinates.x = 0;
-        // g_pxl.coordinates.y = 0;
-    // }
 
     if (g_displayContext.mode == MODE_I2C)
     {
@@ -741,8 +741,14 @@ static void dispSyncFramebuffer(void)
     }
 }
 
+/**
+ * @brief DMA transfer complete callback
+ *
+ * @param isComplete (unused) true if TC, false if ERROR
+ */
 static void dispDMACallback(bool isComplete)
 {
+    (void)isComplete;
     // swap buffers for vsync
     memcpy(g_displayContext.pBackBuffer->buffer, g_displayContext.pFrontBuffer->buffer, SSD1309_GDDRAM_SIZE_BYTES);
     UFrameBuffer_t *pTmp                        = g_displayContext.pFrontBuffer;
@@ -750,4 +756,22 @@ static void dispDMACallback(bool isComplete)
     g_displayContext.pBackBuffer                = pTmp;
     g_displayContext.dmaTransferContext.pBuffer = g_displayContext.pFrontBuffer->buffer;
     g_displayContext.DMAInProgress              = false;
+    g_displayContext.fbModified                 = false;
+}
+
+//=====================================================================================================================
+// Fixed-point math helpers
+//=====================================================================================================================
+
+static inline int16_t fxp_sin(uint16_t deg)
+{
+    return fxp_cos((deg + 90) % 360);
+}
+
+static inline int16_t fxp_cos(uint16_t deg)
+{
+    deg %= 360;
+    uint8_t idx = deg / 5;  // Direct index lookup for 5-degree increments
+    int16_t val = g_cosLUT[idx];
+    return (deg > 90 && deg <= 270) ? -val : val;
 }
