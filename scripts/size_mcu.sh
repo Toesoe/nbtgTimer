@@ -49,6 +49,8 @@ AUTHOR="Gabriel Staples"
 
 DEBUG_PRINTS_ON="false"  # "true" or "false"; can also be passed in as an option: `-d` or `--debug`
 
+LC_NUMERIC=C
+
 SCRIPT_NAME="$(basename "$0")"
 VERSION_SHORT_STR="'$SCRIPT_NAME' version $VERSION"
 VERSION_LONG_STR="\

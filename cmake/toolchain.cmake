@@ -8,7 +8,7 @@ set(CMAKE_GENERATOR Ninja)
 
 if (NOT DEFINED ENV{NBTG_TIMER_TOOLCHAIN})
     if (CMAKE_HOST_UNIX)
-        set(TOOLCHAIN_PATH /opt/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi/bin)
+        set(TOOLCHAIN_PATH /usr/bin)
     endif()
 
     if (CMAKE_HOST_WIN32)
@@ -28,33 +28,31 @@ endif()
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON) # we need gnu ext for asm calls
 #set(CMAKE_VERBOSE_MAKEFILE ON) # enable this if you want to debug make issues
-set(CMAKE_SYSTEM_NAME Generic)
 
 set(CMAKE_C_COMPILER_WORKS TRUE) # prevent errors on initial test compile
 set(CMAKE_CXX_COMPILER_WORKS TRUE)
 
 set(CMAKE_C_COMPILER            ${TOOLCHAIN_PATH}/arm-none-eabi-gcc${TOOL_SUFFIX})
-set(CMAKE_CXX_COMPILER          ${TOOLCHAIN_PATH}/arm-none-eabi-g++${TOOL_SUFFIX})
 set(CMAKE_C_COMPILER_LINKER     ${CMAKE_C_COMPILER})
-set(CMAKE_CXX_COMPILER_LINKER   ${CMAKE_CXX_COMPILER})
+set(CMAKE_CXX_COMPILER_LINKER   ${TOOLCHAIN_PATH}/arm-none-eabi-cpp${TOOL_SUFFIX})
 set(CMAKE_AR                    ${TOOLCHAIN_PATH}/arm-none-eabi-ar${TOOL_SUFFIX})
 set(CMAKE_RANLIB                ${TOOLCHAIN_PATH}/arm-none-eabi-ranlib${TOOL_SUFFIX})
 set(CMAKE_ASM_COMPILER          ${TOOLCHAIN_PATH}/arm-none-eabi-gcc${TOOL_SUFFIX})
 set(CMAKE_SIZE_UTIL             ${TOOLCHAIN_PATH}/arm-none-eabi-size${TOOL_SUFFIX})
 set(CMAKE_OBJCOPY               ${TOOLCHAIN_PATH}/arm-none-eabi-objcopy${TOOL_SUFFIX})
 
-set(COMMON_FLAGS      "-mcpu=${TARGET_CPU} -mthumb -fmax-errors=5 -msoft-float -mfloat-abi=soft -MD")
+set(COMMON_FLAGS      "-ffreestanding -mcpu=${TARGET_CPU} -mthumb -fmax-errors=5 -msoft-float -mfloat-abi=soft -MD")
 set(WARN_FLAGS        "-Wall -Wextra -Wpointer-arith -Wformat -Wno-unused-local-typedefs -Wno-unused-parameter -Wfloat-equal \
                        -Wshadow -Wwrite-strings -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes")
 set(C_CXX_FLAGS       "-ffunction-sections -fdata-sections")
 
-set(CMAKE_C_FLAGS_INIT          "${COMMON_FLAGS} ${C_CXX_FLAGS} ${WARN_FLAGS}" CACHE STRING "" FORCE)
+set(CMAKE_C_FLAGS_INIT          "${COMMON_FLAGS} ${C_CXX_FLAGS} ${WARN_FLAGS} -specs=nano.specs" CACHE STRING "" FORCE)
 set(CMAKE_ASM_FLAGS_INIT        "${COMMON_FLAGS} -x assembler-with-cpp"        CACHE STRING "" FORCE)
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-Wl,--gc-sections -nostdlib -nostartfiles -mthumb -msoft-float -lc -lm"    CACHE STRING "" FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-nostdlib -nostartfiles -Wl,--gc-sections -msoft-float -lm -specs=nosys.specs"    CACHE STRING "" FORCE)
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)

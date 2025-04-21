@@ -15,15 +15,15 @@
 #define MAX_RES_MS   100
 
 // precomputed multipliers
-#define PLUS_ONE_SIXTH 1149
-#define PLUS_ONE_THIRD 1293
-#define PLUS_HALF      1448
-#define PLUS_FULL      2048
+#define PLUS_ONE_SIXTH 1149    // 1.1225 × 1024 ≈ 1149.4
+#define PLUS_ONE_THIRD 1290    // 1.2599 × 1024 ≈ 1290.1
+#define PLUS_HALF 1448         // 1.4142 × 1024 ≈ 1448.2
+#define PLUS_FULL 2048         // 2.0 × 1024 = 2048
 
-#define MINUS_ONE_SIXTH 913
-#define MINUS_ONE_THIRD 813
-#define MINUS_HALF      724
-#define MINUS_FULL      512
+#define MINUS_ONE_SIXTH 891    // 0.8700 × 1024 ≈ 890.9
+#define MINUS_ONE_THIRD 814    // 0.7943 × 1024 ≈ 813.5
+#define MINUS_HALF 724         // 0.7071 × 1024 ≈ 724.1
+#define MINUS_FULL 512         // 0.5 × 1024 = 512
 
 // statics
 static void reverseArray(uint32_t *, size_t);
@@ -54,11 +54,11 @@ uint32_t adjustTime(uint32_t startTime, bool reverse, EFStop_t resolution)
 
     if (mod > MAX_RES_MS / 2)
     {
-        newTime = (newTime * 2) - mod;
+        newTime = newTime + (MAX_RES_MS - mod);  // Round up
     }
     else if (mod != 0)
     {
-        newTime = newTime - mod;
+        newTime = newTime - mod;  // Round down
     }
 
     return newTime;
@@ -66,15 +66,16 @@ uint32_t adjustTime(uint32_t startTime, bool reverse, EFStop_t resolution)
 
 void getTimeTable(uint32_t startTime, bool reverse, size_t steps, EFStop_t resolution, uint32_t *pRes)
 {
-    uint32_t newTimes[steps + 1]; // +1 for start time
-    newTimes[0] = startTime;
-
+    uint32_t currentTime = startTime;
+    
     for (size_t i = 0; i < steps; i++)
     {
-        newTimes[i + 1] = adjustTime(newTimes[i], reverse, resolution);
+        // Calculate the next time value based on the current time
+        currentTime = adjustTime(currentTime, reverse, resolution);
+        
+        // Store the result
+        pRes[i] = currentTime;
     }
-
-    memcpy(pRes, &newTimes[1], steps * sizeof(uint32_t)); // don't copy the start time
 }
 
 void genererateTestStrip(uint32_t baseTime, size_t steps, EFStop_t resolution, uint32_t *pRes)

@@ -19,6 +19,8 @@ extern "C"
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include "display/fonts.h"
+
 //=====================================================================================================================
 // Defines
 //=====================================================================================================================
@@ -80,7 +82,7 @@ typedef enum
 {
     COLOR_BLACK,
     COLOR_WHITE
-} EPixelColor_t;
+} EColor_t;
 
 typedef struct
 {
@@ -91,14 +93,14 @@ typedef struct
 typedef struct
 {
     SPoint_t coordinates;
-    EPixelColor_t color;
+    EColor_t color;
 } SPixel_t;
 
 typedef struct
 {
     SPoint_t start;
     SPoint_t end;
-    EPixelColor_t color;
+    EColor_t color;
 } SLine_t;
 
 //=====================================================================================================================
@@ -108,7 +110,21 @@ typedef struct
 void initDisplay(EDisplayMode_t);
 void toggleDisplay(bool);
 void dispDrawPixel(SPixel_t);
+
+void dispWriteSymbol(SymbolID_t Symbol, uint8_t x, uint8_t y);
+char dispWriteChar(char ch, FontDef Font, EColor_t color);
+char dispWriteString(const char* str, FontDef Font, EColor_t color);
+void dispSetCursor(uint8_t x, uint8_t y);
 void dispDrawLine(SLine_t);
+void dispDrawArc(SPoint_t, uint8_t radius, uint16_t start_angle, uint16_t sweep, EColor_t color);
+void dispDrawArcWithRadiusLine(uint8_t x, uint8_t y, uint8_t radius, uint16_t start_angle, uint16_t sweep, EColor_t color);
+void dispDrawCircle(SPoint_t, uint8_t, EColor_t, bool);
+void dispFillCircle(uint8_t par_x,uint8_t par_y, uint8_t par_r, EColor_t par_color);
+void dispPolyline(const SPoint_t *par_vertex, uint16_t par_size, EColor_t color);
+void dispDrawRectangle(SPoint_t, SPoint_t, EColor_t);
+void dispDrawFilledRectangle(SPoint_t start, SPoint_t end, EColor_t color);
+void dispDrawBitmap(SPoint_t, const unsigned char*, uint8_t, uint8_t, EColor_t);
+
 
 #ifdef __cplusplus
 }

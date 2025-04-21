@@ -78,7 +78,7 @@ void spiInit(SPI_TypeDef *pSPIPeripheral)
     SPI_InitStruct.ClockPolarity     = LL_SPI_POLARITY_HIGH;
     SPI_InitStruct.ClockPhase        = LL_SPI_PHASE_2EDGE;
     SPI_InitStruct.NSS               = LL_SPI_NSS_SOFT;
-    SPI_InitStruct.BaudRate          = LL_SPI_BAUDRATEPRESCALER_DIV32;
+    SPI_InitStruct.BaudRate          = LL_SPI_BAUDRATEPRESCALER_DIV16;
     SPI_InitStruct.BitOrder          = LL_SPI_MSB_FIRST;
     SPI_InitStruct.CRCCalculation    = LL_SPI_CRCCALCULATION_DISABLE;
     SPI_InitStruct.CRCPoly           = CRC16_POLY_CCITT;
@@ -140,7 +140,7 @@ void spiInitDisplayDMA(spiStatusCallback dmaStatusCb)
     LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_DMA1);
     LL_DMA_SetPeriphRequest(DMA1, LL_DMA_CHANNEL_2, LL_DMAMUX_REQ_SPI2_TX);
     LL_DMA_SetDataTransferDirection(DMA1, LL_DMA_CHANNEL_2, LL_DMA_DIRECTION_MEMORY_TO_PERIPH);
-    LL_DMA_SetChannelPriorityLevel(DMA1, LL_DMA_CHANNEL_2, LL_DMA_PRIORITY_LOW);
+    LL_DMA_SetChannelPriorityLevel(DMA1, LL_DMA_CHANNEL_2, LL_DMA_PRIORITY_HIGH);
     LL_DMA_SetMode(DMA1, LL_DMA_CHANNEL_2, LL_DMA_MODE_NORMAL);
     LL_DMA_SetPeriphIncMode(DMA1, LL_DMA_CHANNEL_2, LL_DMA_PERIPH_NOINCREMENT);
     LL_DMA_SetMemoryIncMode(DMA1, LL_DMA_CHANNEL_2, LL_DMA_MEMORY_INCREMENT);
@@ -158,7 +158,6 @@ void spiInitDisplayDMA(spiStatusCallback dmaStatusCb)
 
 void spiTransferBlockDMA(SSPITransfer_t *pDMATransferCtx)
 {
-
     LL_DMA_ConfigAddresses(DMA1, LL_DMA_CHANNEL_2,
       (uint32_t)pDMATransferCtx->pBuffer,
       (uint32_t)LL_SPI_DMA_GetRegAddr(g_pSPIPeripheral),
@@ -166,9 +165,12 @@ void spiTransferBlockDMA(SSPITransfer_t *pDMATransferCtx)
     );
 
     LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_2, pDMATransferCtx->len);
-    LL_SPI_EnableDMAReq_TX(g_pSPIPeripheral);
-    LL_SPI_Enable(g_pSPIPeripheral);
+    //__disable_irq();
+    toggleDisplayDataCommand(false);
     selectDisplay(true);
+    //__enable_irq();
+    LL_SPI_Enable(g_pSPIPeripheral);
+    LL_SPI_EnableDMAReq_TX(g_pSPIPeripheral);
     LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_2);
 }
 
@@ -183,14 +185,15 @@ __attribute__((interrupt)) void DMA1_Channel2_3_IRQHandler(void)
     {
         LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_2);
         LL_DMA_ClearFlag_TC2(DMA1);
-        selectDisplay(false);
         LL_SPI_Disable(g_pSPIPeripheral);
+        selectDisplay(false);
         if (g_fnSpiDMACallback != NULL) g_fnSpiDMACallback(true);
     }
     else if (LL_DMA_IsActiveFlag_TE2(DMA1))
     {
         LL_DMA_ClearFlag_TE2(DMA1);
         LL_SPI_Disable(g_pSPIPeripheral);
+        selectDisplay(false);
         if (g_fnSpiDMACallback != NULL) g_fnSpiDMACallback(false);
     }
 }

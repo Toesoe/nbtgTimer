@@ -56,7 +56,7 @@ void initGPIO_peripherals(STimerPeriphPinDef_t *pPinDefs)
 {
     g_pCurrentPeriphPinDefs = pPinDefs;
 
-    initGPIO_I2C(g_pCurrentPeriphPinDefs->pI2cDispPinDef);
+    //initGPIO_I2C(g_pCurrentPeriphPinDefs->pI2cDispPinDef);
     initGPIO_I2C(g_pCurrentPeriphPinDefs->pI2cEepromPinDef);
     initGPIO_SPI(g_pCurrentPeriphPinDefs->pSpiDisplayDef);
 }
@@ -185,7 +185,7 @@ static void initGPIO_SPI(SSPIPinDef_t *pSPIDef)
     LL_GPIO_InitTypeDef spiGpio = {
         .Pin        = pSPIDef->sckPin.pin,
         .Mode       = LL_GPIO_MODE_ALTERNATE,
-        .Speed      = LL_GPIO_SPEED_FREQ_HIGH,
+        .Speed      = LL_GPIO_SPEED_FREQ_MEDIUM,
         .OutputType = LL_GPIO_OUTPUT_PUSHPULL,
         .Pull       = LL_GPIO_PULL_NO, // HW pullup
         .Alternate  = pSPIDef->pinAFMode,
@@ -201,10 +201,14 @@ static void initGPIO_SPI(SSPIPinDef_t *pSPIDef)
 
     spiGpio.Pin  = pSPIDef->csPin.pin;
     spiGpio.Mode = LL_GPIO_MODE_OUTPUT; // no AF: CS is done in SW
+    spiGpio.Pull = LL_GPIO_PULL_UP;
     LL_GPIO_Init(pSPIDef->csPin.port, &spiGpio);
 
     spiGpio.Pin = pSPIDef->dcPin.pin;
     LL_GPIO_Init(pSPIDef->dcPin.port, &spiGpio);
+
+    spiGpio.Pin = pSPIDef->rstPin.pin;
+    LL_GPIO_Init(pSPIDef->rstPin.port, &spiGpio);
 }
 
 static void initGPIO_Generic(SGenericGPIOPin_t *pGenericPinDef)

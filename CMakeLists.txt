@@ -4,7 +4,7 @@ cmake_policy(SET CMP0135 NEW)
 
 project(nbtgTimer
     DESCRIPTION "nbtgTimer firmware"
-    LANGUAGES C CXX ASM
+    LANGUAGES C ASM
     VERSION "0.0.1"
 )
 
