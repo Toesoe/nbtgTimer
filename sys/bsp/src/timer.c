@@ -62,7 +62,7 @@ void initTimer(STimerDef_t const *pTimerDef)
     {
         LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM14);
         LL_TIM_SetPrescaler(pTimerDef->pHWTimer, __LL_TIM_CALC_PSC(SystemCoreClock, pTimerDef->period));
-        LL_TIM_SetAutoReload(TIM14, __LL_TIM_CALC_ARR(SystemCoreClock, LL_TIM_GetPrescaler(TIM14), 33)); // 30fps tick
+        LL_TIM_SetAutoReload(TIM14, __LL_TIM_CALC_ARR(SystemCoreClock, LL_TIM_GetPrescaler(TIM14), 33)); // 30hz tick for a 30fps refresh
         LL_TIM_EnableIT_UPDATE(TIM14);
         NVIC_SetPriority(TIM14_IRQn, 0);
         LL_TIM_EnableCounter(pTimerDef->pHWTimer);
@@ -71,6 +71,7 @@ void initTimer(STimerDef_t const *pTimerDef)
     {
         LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM15);
         LL_TIM_SetPrescaler(pTimerDef->pHWTimer, __LL_TIM_CALC_PSC(SystemCoreClock, pTimerDef->period));
+        LL_TIM_SetAutoReload(TIM14, __LL_TIM_CALC_ARR(SystemCoreClock, LL_TIM_GetPrescaler(TIM14), 100)); // 10hz for .1 second resolution
         LL_TIM_EnableIT_UPDATE(TIM15);
         NVIC_SetPriority(TIM15_IRQn, 0);
     }
@@ -170,7 +171,6 @@ void TIM15_IRQHandler(void)
 {
     if (LL_TIM_IsActiveFlag_UPDATE(TIM15))
     {
-        LL_TIM_DisableCounter(TIM15);
         LL_TIM_ClearFlag_UPDATE(TIM15);
         if (g_enlargerCallback.fnCb) g_enlargerCallback.fnCb(g_enlargerCallback.pUserCtx);
     }

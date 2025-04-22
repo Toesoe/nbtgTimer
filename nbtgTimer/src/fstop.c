@@ -7,9 +7,17 @@
  * TODO: test strip mode, either 1/6th or 1/3rd : -1, -2/3, -1/3, B, etc
  */
 
+ //=====================================================================================================================
+// Includes
+//=====================================================================================================================
+
 #include "fstop.h"
 
 #include <string.h>
+
+//=====================================================================================================================
+// Defines
+//=====================================================================================================================
 
 #define SCALE_FACTOR 1024
 #define MAX_RES_MS   100
@@ -25,10 +33,29 @@
 #define MINUS_HALF 724         // 0.7071 × 1024 ≈ 724.1
 #define MINUS_FULL 512         // 0.5 × 1024 = 512
 
-// statics
+//=====================================================================================================================
+// Constants
+//=====================================================================================================================
+
+//=====================================================================================================================
+// Types
+//=====================================================================================================================
+
+//=====================================================================================================================
+// Globals
+//=====================================================================================================================
+
+//=====================================================================================================================
+// Static protos
+//=====================================================================================================================
+
 static void reverseArray(uint32_t *, size_t);
 
-uint32_t adjustTime(uint32_t startTime, bool reverse, EFStop_t resolution)
+//=====================================================================================================================
+// Functions
+//=====================================================================================================================
+
+uint32_t calculateNextFStop(uint32_t startTime, bool reverse, EFStop_t resolution)
 {
     uint32_t newTime = 0;
 
@@ -71,7 +98,7 @@ void getTimeTable(uint32_t startTime, bool reverse, size_t steps, EFStop_t resol
     for (size_t i = 0; i < steps; i++)
     {
         // Calculate the next time value based on the current time
-        currentTime = adjustTime(currentTime, reverse, resolution);
+        currentTime = calculateNextFStop(currentTime, reverse, resolution);
         
         // Store the result
         pRes[i] = currentTime;
@@ -83,12 +110,15 @@ void genererateTestStrip(uint32_t baseTime, size_t steps, EFStop_t resolution, u
     uint32_t testStripTime[(steps * 2) + 1];
     uint32_t tmp[steps];
 
+    // calculate lower set of times (so shorter than baseTime)
     getTimeTable(baseTime, true, steps, resolution, &tmp[0]);
     reverseArray(tmp, steps);
     memcpy(testStripTime, tmp, steps * sizeof(uint32_t));
 
+    // original time goes in the middle
     testStripTime[steps] = baseTime;
 
+    // calculate higher set of times
     getTimeTable(baseTime, false, steps, resolution, &tmp[0]);
     memcpy(&testStripTime[steps + 1], tmp, steps * sizeof(uint32_t));
 

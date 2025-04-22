@@ -102,8 +102,6 @@ void initBoard(void)
     initSysclock();
 
     initTimer(&delayTimer);
-    initTimer(&framerateTimer);
-    initTimer(&enlargerTimer);
 
     NVIC_SetPriority(DMA1_Channel1_IRQn, 0);
     NVIC_EnableIRQ(DMA1_Channel1_IRQn);
@@ -118,6 +116,9 @@ void initBoard(void)
     i2cInit(g_R1_eepromI2C.pPeripheral, I2C_100KHZ, false);
     //i2cInit(g_R1_dispI2C.pPeripheral, I2C_1MHZ, true);
     spiInit(g_R1_dispSPI.pPeripheral);
+
+    initTimer(&framerateTimer);
+    initTimer(&enlargerTimer);
 }
 
 void hwDelayMs(uint32_t ms)

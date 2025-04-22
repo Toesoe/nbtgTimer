@@ -6,8 +6,7 @@
  * using horizontal addressing and DMA we get about 60fps at 8MHz: 30 is plenty so we use a hw timer on autoreload
  * built for SSD1309 displays in Mode 5
  *
- * graphics routines are based on https://github.com/DuyTrandeLion/nrf52-ssd1309, which is licensed under MIT.
- *
+ * graphics routines are based on https://github.com/DuyTrandeLion/nrf52-ssd1309, which is licensed under MIT: Copyright (c) 2021 Duy Lion Tran
  * improvements in this version:
  * - double buffering
  * - horizontal addressing mode, allows for DMA'ing the full framebuffer in 1 chunk

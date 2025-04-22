@@ -28,7 +28,7 @@ typedef enum
  * 
  * @return adjusted time, rounded to nearest 100ms interval
  */
-uint32_t adjustTime(uint32_t startTime, bool reverse, EFStop_t resolution);
+uint32_t calculateNextFStop(uint32_t startTime, bool reverse, EFStop_t resolution)
 
 /**
  * @brief returns table of times for a given start time and number of steps
